@@ -320,51 +320,49 @@
             const buyButton = getXPathElement('/html/body/div[4]/div/div[3]/div/div[9]/div/div/div/div/div[3]/button');
             
             if (buyLimitInput && buyAmountInput && buyButton) {
-                simulateMouseMove(buyLimitInput);
+                // Fill buy price
+                buyLimitInput.focus();
                 setTimeout(() => {
-                    buyLimitInput.focus();
+                    setReactValue(buyLimitInput, buyPrice);
                     setTimeout(() => {
-                        setReactValue(buyLimitInput, buyPrice);
+                        // Fill buy amount
+                        buyAmountInput.focus();
                         setTimeout(() => {
-                            simulateMouseMove(buyAmountInput);
+                            setReactValue(buyAmountInput, amount);
                             setTimeout(() => {
-                                buyAmountInput.focus();
-                                setTimeout(() => {
-                                    setReactValue(buyAmountInput, amount);
+                                // Fill sell price
+                                const sellLimitInput = document.querySelector('.h-auto > div:nth-child(5) > div:nth-child(2) > div:nth-child(2) > input:nth-child(1)');
+                                if (sellLimitInput) {
+                                    sellLimitInput.focus();
                                     setTimeout(() => {
-                                        simulateMouseMove(buyButton);
+                                        setReactValue(sellLimitInput, sellPrice);
                                         setTimeout(() => {
-                                            humanClick(buyButton);
-                                            setTimeout(async () => {
-                                                await clickConfirmWithRetry();
-                                                // Fill sell fields after buy order
+                                            // Fill sell amount
+                                            const sellAmountInput = getXPathElement('//*[@id="limitTotal"]');
+                                            if (sellAmountInput) {
+                                                sellAmountInput.focus();
                                                 setTimeout(() => {
-                                                    const sellLimitInput = document.querySelector('.h-auto > div:nth-child(5) > div:nth-child(2) > div:nth-child(2) > input:nth-child(1)');
-                                                    if (sellLimitInput) {
-                                                        sellLimitInput.focus();
+                                                    setReactValue(sellAmountInput, amount);
+                                                    setTimeout(() => {
+                                                        // Now click buy button
+                                                        simulateMouseMove(buyButton);
                                                         setTimeout(() => {
-                                                            setReactValue(sellLimitInput, sellPrice);
-                                                            setTimeout(() => {
-                                                                const sellAmountInput = getXPathElement('//*[@id="limitTotal"]');
-                                                                if (sellAmountInput) {
-                                                                    sellAmountInput.focus();
-                                                                    setTimeout(() => {
-                                                                        setReactValue(sellAmountInput, amount);
-                                                                    }, 100);
-                                                                }
-                                                            }, 200);
-                                                        }, 100);
-                                                    }
-                                                }, 300);
-                                                monitorOrder();
-                                            }, randomDelay(150, 200));
-                                        }, randomDelay(30, 50));
-                                    }, randomDelay(50, 80));
-                                }, randomDelay(30, 50));
-                            }, randomDelay(30, 50));
-                        }, randomDelay(50, 80));
-                    }, randomDelay(30, 50));
-                }, randomDelay(20, 40));
+                                                            humanClick(buyButton);
+                                                            setTimeout(async () => {
+                                                                await clickConfirmWithRetry();
+                                                                monitorOrder();
+                                                            }, randomDelay(150, 200));
+                                                        }, randomDelay(30, 50));
+                                                    }, randomDelay(50, 80));
+                                                }, 100);
+                                            }
+                                        }, 200);
+                                    }, 100);
+                                }
+                            }, 200);
+                        }, 100);
+                    }, 200);
+                }, 100);
                 e.target.textContent = '✓';
                 setTimeout(() => e.target.textContent = 'Buy', 1000);
             }
@@ -456,20 +454,27 @@
             let buyPrice, sellPrice;
             
             if (buyTrades.length > 0 && sellTrades.length > 0) {
-                // Use median of recent buy/sell trades
-                const medianBuy = buyTrades.sort((a,b) => a-b)[Math.floor(buyTrades.length/2)];
-                const medianSell = sellTrades.sort((a,b) => a-b)[Math.floor(sellTrades.length/2)];
+                const sortedBuy = buyTrades.sort((a,b) => a-b);
+                const sortedSell = sellTrades.sort((a,b) => a-b);
+                const medianBuy = sortedBuy[Math.floor(sortedBuy.length/2)];
+                const medianSell = sortedSell[Math.floor(sortedSell.length/2)];
                 
-                // Set buy slightly below median buy, sell slightly above median sell
-                buyPrice = medianBuy * 0.9999; // 0.01% below
-                sellPrice = medianSell * 1.0001; // 0.01% above
+                // Buy at least 0.01% above current to fill instantly
+                buyPrice = Math.max(medianBuy, currentPrice * 1.0001);
+                
+                // Sell at highest possible price from order book that's still below buy
+                const viableSells = sortedSell.filter(p => p < buyPrice && p >= currentPrice * 0.999);
+                if (viableSells.length > 0) {
+                    sellPrice = viableSells[viableSells.length - 1]; // Highest viable sell
+                } else {
+                    sellPrice = Math.min(medianSell, buyPrice * 0.9995); // 0.05% below buy
+                }
             } else {
-                // Fallback to percentage-based
-                buyPrice = currentPrice * 0.9998; // 0.02% below
-                sellPrice = currentPrice * 1.0002; // 0.02% above
+                buyPrice = currentPrice * 1.0001;
+                sellPrice = currentPrice * 0.9999;
             }
             
-            const lossPercent = Math.abs((sellPrice - buyPrice) / buyPrice * 100).toFixed(3);
+            const lossPercent = ((buyPrice - sellPrice) / buyPrice * 100).toFixed(3);
             
             return {
                 market: currentPrice.toFixed(8),
