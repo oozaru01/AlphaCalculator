@@ -28,12 +28,21 @@
         div.id = id;
         div.innerHTML = `<div style="font-weight:bold; font-size:18px; margin-bottom:6px; cursor:move;">${title}</div><div id="${id}-content">Loading...</div>`;
         
-        // Make draggable
+        // Make draggable with auto-hover pause
         let isDragging = false;
         let startX, startY, startLeft, startTop;
         
+        div.addEventListener('mouseenter', () => {
+            autoHoverEnabled = false; // Stop auto-hover when mouse is on overlay
+        });
+        
+        div.addEventListener('mouseleave', () => {
+            autoHoverEnabled = true; // Resume auto-hover when mouse leaves overlay
+        });
+        
         div.addEventListener('mousedown', (e) => {
             isDragging = true;
+            autoHoverEnabled = false;
             startX = e.clientX;
             startY = e.clientY;
             startLeft = parseInt(div.style.left);
@@ -51,6 +60,9 @@
         
         document.addEventListener('mouseup', () => {
             isDragging = false;
+            setTimeout(() => {
+                autoHoverEnabled = true; // Resume auto-hover after drag
+            }, 500);
         });
         
         document.body.appendChild(div);
@@ -80,12 +92,160 @@
     async function main() {
         // Global variables
         window.currentBalance = 0;
+        window.livePrice = null;
         let mousePaused = false;
         let mousePauseTimer = null;
         let countdownInterval = null;
         let originalContent = '';
         
         let currentCount = 0;
+        
+        // Enhanced WebSocket and data interception
+        function interceptWebSocket() {
+            const originalWebSocket = window.WebSocket;
+            window.WebSocket = function(...args) {
+                const ws = new originalWebSocket(...args);
+                console.log('WebSocket created:', args[0]);
+                
+                const originalOnMessage = ws.onmessage;
+                ws.onmessage = function(event) {
+                    try {
+                        const data = JSON.parse(event.data);
+                        
+                        // Binance stream formats
+                        if (data.stream && data.data) {
+                            const streamData = data.data;
+                            if (streamData.c) window.livePrice = parseFloat(streamData.c);
+                            if (streamData.k && streamData.k.c) window.livePrice = parseFloat(streamData.k.c);
+                        }
+                        
+                        // Direct ticker/kline data
+                        if (data.c && parseFloat(data.c) > 0) {
+                            window.livePrice = parseFloat(data.c);
+                        }
+                        if (data.k && data.k.c && parseFloat(data.k.c) > 0) {
+                            window.livePrice = parseFloat(data.k.c);
+                        }
+                        
+                        // Array format
+                        if (Array.isArray(data) && data.length > 0) {
+                            data.forEach(item => {
+                                if (item.c) window.livePrice = parseFloat(item.c);
+                                if (item.k && item.k.c) window.livePrice = parseFloat(item.k.c);
+                            });
+                        }
+                        
+                        if (window.livePrice) {
+                            console.log('Live price updated:', window.livePrice);
+                        }
+                    } catch (e) {}
+                    
+                    if (originalOnMessage) {
+                        originalOnMessage.call(this, event);
+                    }
+                };
+                
+                return ws;
+            };
+        }
+        
+        // Intercept fetch requests for price data
+        function interceptFetch() {
+            const originalFetch = window.fetch;
+            window.fetch = function(...args) {
+                return originalFetch.apply(this, args).then(response => {
+                    if (response.url.includes('ticker') || response.url.includes('klines')) {
+                        response.clone().json().then(data => {
+                            if (data.price) window.livePrice = parseFloat(data.price);
+                            if (data.c) window.livePrice = parseFloat(data.c);
+                            if (Array.isArray(data) && data.length > 0 && data[0].length > 4) {
+                                window.livePrice = parseFloat(data[data.length - 1][4]); // Close price
+                            }
+                        }).catch(() => {});
+                    }
+                    return response;
+                });
+            };
+        }
+        
+        interceptWebSocket();
+        interceptFetch();
+        
+        // Intercept global price variables
+        function interceptGlobalData() {
+            // Monitor window object for price data
+            const checkGlobals = () => {
+                if (window.binanceData && window.binanceData.price) {
+                    window.livePrice = parseFloat(window.binanceData.price);
+                }
+                if (window.currentPrice && parseFloat(window.currentPrice) > 0) {
+                    window.livePrice = parseFloat(window.currentPrice);
+                }
+                // Check for TradingView datafeeds
+                if (window.TradingView && window.TradingView.widget) {
+                    try {
+                        const chart = window.TradingView.widget.chart();
+                        if (chart && chart.getSeries) {
+                            const series = chart.getSeries();
+                            if (series && series.data && series.data.length > 0) {
+                                const lastBar = series.data[series.data.length - 1];
+                                if (lastBar.close) window.livePrice = lastBar.close;
+                            }
+                        }
+                    } catch (e) {}
+                }
+            };
+            setInterval(checkGlobals, 100);
+        }
+        
+        interceptGlobalData();
+        
+        // Auto-hover chart to trigger price display
+        function triggerChartHover() {
+            const chartArea = document.querySelector('[data-testid="kline"]') || 
+                            document.querySelector('.kline-container') ||
+                            document.querySelector('canvas.scene');
+            if (chartArea) {
+                const rect = chartArea.getBoundingClientRect();
+                const centerX = rect.left + rect.width / 2;
+                const centerY = rect.top + rect.height / 2;
+                
+                chartArea.dispatchEvent(new MouseEvent('mouseover', {
+                    bubbles: true,
+                    clientX: centerX,
+                    clientY: centerY
+                }));
+                chartArea.dispatchEvent(new MouseEvent('mousemove', {
+                    bubbles: true,
+                    clientX: centerX,
+                    clientY: centerY
+                }));
+            }
+        }
+        
+        // Control auto-hover to avoid interfering with user interactions
+        let autoHoverEnabled = true;
+        let hoverInterval = setInterval(() => {
+            if (autoHoverEnabled) {
+                triggerChartHover();
+            }
+        }, 100); // Reduced frequency to 100ms
+        
+        // Monitor DOM changes for price updates
+        const observer = new MutationObserver(() => {
+            // Force update when DOM changes
+            triggerChartHover();
+        });
+        
+        // Start observing chart area for changes
+        setTimeout(() => {
+            const chartArea = document.querySelector('[data-testid="kline"]') || document.body;
+            observer.observe(chartArea, {
+                childList: true,
+                subtree: true,
+                characterData: true
+            });
+        }, 1000);
         
         // Update countdown display
         function updateCountdown() {
@@ -222,13 +382,15 @@
         function ensureCheckboxChecked() {
             const checkboxContainer = getXPathElement('/html/body/div[4]/div/div[3]/div/div[9]/div/div/div/div/div[3]/div[5]/div[1]/div[1]/div');
             if (checkboxContainer) {
-                const checkbox = checkboxContainer.querySelector('input[type="checkbox"]');
-                if (checkbox && !checkbox.checked) {
-                    const svg = checkboxContainer.querySelector('svg');
-                    if (svg) {
-                        humanClick(svg);
-                    }
+                const isChecked = checkboxContainer.getAttribute('aria-checked') === 'true';
+                if (!isChecked) {
+                    console.log('Checking Reverse Order checkbox');
+                    humanClick(checkboxContainer);
+                } else {
+                    console.log('Reverse Order already checked');
                 }
+            } else {
+                console.log('Reverse Order checkbox not found');
             }
         }
         
@@ -296,31 +458,35 @@
         // Wait until Open Orders is completely empty (both Buy and Sell completed)
         async function waitForTradeCompletion() {
             console.log('Waiting for trade completion...');
-            await new Promise(r => setTimeout(r, 2000)); // Wait minimum 2 seconds
             
-            // Wait indefinitely until no orders remain
+            // Check for notification popups first
             let checkCount = 0;
-            while (true) {
-                await new Promise(r => setTimeout(r, 1000)); // Check every 1 second
+            while (checkCount < 30) { // Max 30 seconds
+                await new Promise(r => setTimeout(r, 1000));
                 checkCount++;
                 
+                // Check for buy/sell order filled notifications
+                const buyNotification = document.querySelector('.bn-notification-content-title');
+                if (buyNotification && (buyNotification.textContent.includes('Buy Order Filled') || buyNotification.textContent.includes('Sell Order Filled'))) {
+                    console.log('Order filled notification detected:', buyNotification.textContent);
+                    // Close notification
+                    const closeBtn = document.querySelector('.bn-notification-close');
+                    if (closeBtn) closeBtn.click();
+                }
+                
+                // Check Open Orders section
                 const orderSection = getXPathElement('/html/body/div[4]/div/div[3]/div/div[8]/div/div/div/div/div[2]/div[1]/div');
+                if (orderSection) {
+                    const orderText = orderSection.textContent;
+                    console.log(`Check ${checkCount}: Order section text:`, orderText);
+                    
+                    // Success: No orders at all
+                    if (orderText.includes('No Ongoing Orders')) {
+                        console.log('Trade completed - No Ongoing Orders');
+                        return 'completed';
+                    }
                 
-                if (!orderSection) {
-                    console.log('Order section not found');
-                    continue;
-                }
-                
-                const orderText = orderSection.textContent;
-                console.log(`Check ${checkCount}: Order section text:`, orderText);
-                
-                // Success: No orders at all
-                if (orderText.includes('No Ongoing Orders')) {
-                    console.log('Trade completed - No Ongoing Orders');
-                    return 'completed';
-                }
-                
-                // Handle stuck orders after 10 seconds
+                    // Handle stuck orders after 10 seconds
                 if (checkCount >= 10) {
                     if (orderText.includes('Buy')) {
                         console.log('Buy order stuck for 10s, canceling...');
@@ -344,10 +510,11 @@
                     }
                 }
                 
-                // Continue waiting if Sell order exists (normal flow)
-                if (orderText.includes('Sell')) {
-                    console.log('Sell order active, waiting...');
-                    continue;
+                    // Continue waiting if Sell order exists (normal flow)
+                    if (orderText.includes('Sell')) {
+                        console.log('Sell order active, waiting...');
+                        continue;
+                    }
                 }
             }
         }
@@ -391,7 +558,13 @@
         let isExecuting = false;
         let isPaused = false;
         async function executeBulkTrades() {
-            if (isExecuting) return;
+            if (isExecuting) {
+                console.log('Already executing, stopping current execution');
+                isExecuting = false;
+                await new Promise(r => setTimeout(r, 500));
+            }
+            
+            console.log('Starting new bulk trade execution');
             isExecuting = true;
             isPaused = false;
             
@@ -422,16 +595,22 @@
                 }
                 if (!isExecuting) break;
                 
-                // Safety checks
-                if (!checkMaxLoss()) {
+                // Safety checks with debug logging
+                const maxLossCheck = checkMaxLoss();
+                const rateLimitCheck = checkRateLimit();
+                console.log(`Safety checks - MaxLoss: ${maxLossCheck}, RateLimit: ${rateLimitCheck}`);
+                
+                if (!maxLossCheck) {
                     statusEl.textContent = 'STOPPED: Max loss limit reached!';
                     statusEl.style.color = '#FF0000';
+                    console.log('Stopped due to max loss limit');
                     break;
                 }
                 
-                if (!checkRateLimit()) {
+                if (!rateLimitCheck) {
                     statusEl.textContent = 'STOPPED: Rate limit reached (wait 1 hour)';
                     statusEl.style.color = '#FF0000';
+                    console.log('Stopped due to rate limit');
                     break;
                 }
                 
@@ -440,18 +619,22 @@
                 
                 // Fresh price calculation
                 const prices = calculateOptimalPrices();
+                console.log('Calculated prices:', prices);
                 if (!prices) {
                     statusEl.textContent = `Trade ${i + 1}/${tradesCount}: Price error`;
+                    console.log('Price calculation failed');
                     await new Promise(r => setTimeout(r, 2000));
                     continue;
                 }
                 
                 const amount = parseFloat(document.getElementById('trade-amount').value) || 1;
+                console.log('Trade amount:', amount, 'Current balance:', window.currentBalance);
                 
                 // Balance check
                 if (!checkBalance(amount)) {
                     statusEl.textContent = `STOPPED: Insufficient balance (need ${amount} USDT)`;
                     statusEl.style.color = '#FF0000';
+                    console.log('Insufficient balance - stopping');
                     break;
                 }
                 
@@ -498,6 +681,9 @@
                     humanClick(buyButton);
                     await new Promise(r => setTimeout(r, randomDelay(150, 200)));
                     await clickConfirmWithRetry();
+                    
+                    // Wait 2 seconds after confirmation for order processing
+                    await new Promise(r => setTimeout(r, 2000));
                     
                     // Wait for trade completion
                     statusEl.textContent = `Trade ${i + 1}/${tradesCount}: Waiting...`;
@@ -918,21 +1104,35 @@
             let currentPrice = null;
             const trades = [];
             
-            // Method 1: Chart close price (fastest, 50ms acceptable)
-            const chartCloseEl = document.querySelector('.default-label-box[key="c"]');
-            if (chartCloseEl) {
-                const price = parseFloat(chartCloseEl.textContent);
-                if (!isNaN(price) && price > 0) {
-                    currentPrice = price;
-                    trades.push(price);
+            // Method 0: Live WebSocket price (fastest)
+            if (window.livePrice && window.livePrice > 0) {
+                currentPrice = window.livePrice;
+                trades.push(currentPrice);
+            }
+            
+            // Method 1: Chart container close price (most reliable)
+            if (!currentPrice) {
+                // Trigger hover first to ensure elements are visible
+                triggerChartHover();
+                
+                const chartContainer = document.querySelector('.chart-title-indicator-container');
+                if (chartContainer) {
+                    const closeEl = chartContainer.querySelector('span[key="c"]');
+                    if (closeEl) {
+                        const price = parseFloat(closeEl.textContent.trim());
+                        if (!isNaN(price) && price > 0) {
+                            currentPrice = price;
+                            trades.push(price);
+                        }
+                    }
                 }
             }
             
-            // Method 2: Top ticker price (alternative live price)
+            // Method 2: Direct selector fallback
             if (!currentPrice) {
-                const tickerPrice = document.querySelector('[class*="showPrice"]');
-                if (tickerPrice) {
-                    const price = parseFloat(tickerPrice.textContent.replace(/[^0-9.]/g, ''));
+                const closeEl = document.querySelector('span[key="c"]');
+                if (closeEl) {
+                    const price = parseFloat(closeEl.textContent.trim());
                     if (!isNaN(price) && price > 0) {
                         currentPrice = price;
                         trades.push(price);
@@ -940,13 +1140,55 @@
                 }
             }
             
-            // Method 3: Main market price display via XPath
+            // Method 2: Header price displays
             if (!currentPrice) {
-                const priceXPath = '/html/body/div[4]/div/div[2]/div/div/div[2]/div[1]';
-                const mainPriceEl = getXPathElement(priceXPath);
-                if (mainPriceEl) {
-                    const priceText = mainPriceEl.textContent.trim().replace(/[^0-9.]/g, '');
-                    const price = parseFloat(priceText);
+                const headerSelectors = [
+                    '[class*="showPrice"]',
+                    '[data-testid="ticker-price"]',
+                    '.ticker-price',
+                    '.symbol-price',
+                    '.market-price'
+                ];
+                
+                for (const selector of headerSelectors) {
+                    const el = document.querySelector(selector);
+                    if (el) {
+                        const price = parseFloat(el.textContent.replace(/[^0-9.]/g, ''));
+                        if (!isNaN(price) && price > 0) {
+                            currentPrice = price;
+                            trades.push(price);
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            // Method 3: XPath fallbacks
+            if (!currentPrice) {
+                const xpaths = [
+                    '/html/body/div[4]/div/div[2]/div/div/div[2]/div[1]',
+                    '/html/body/div[4]/div/div[2]/div/div/div[1]/div[2]',
+                    '/html/body/div[4]/div/div[2]/div/div/div[2]'
+                ];
+                
+                for (const xpath of xpaths) {
+                    const el = getXPathElement(xpath);
+                    if (el) {
+                        const price = parseFloat(el.textContent.replace(/[^0-9.]/g, ''));
+                        if (!isNaN(price) && price > 0 && price.toString().length > 3) {
+                            currentPrice = price;
+                            trades.push(price);
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            // Method 4: Trading panel price input (current market price)
+            if (!currentPrice) {
+                const priceInput = document.getElementById('limitPrice');
+                if (priceInput && priceInput.placeholder) {
+                    const price = parseFloat(priceInput.placeholder.replace(/[^0-9.]/g, ''));
                     if (!isNaN(price) && price > 0) {
                         currentPrice = price;
                         trades.push(price);
@@ -954,16 +1196,20 @@
                 }
             }
             
-            // Method 4: Any element with large price-like number
+            // Method 5: Scan all numeric elements
             if (!currentPrice) {
-                const priceElements = document.querySelectorAll('[class*="price"], [class*="Price"]');
-                for (const el of priceElements) {
-                    const text = el.textContent.trim().replace(/[^0-9.]/g, '');
-                    const price = parseFloat(text);
-                    if (!isNaN(price) && price > 0 && text.length > 3) {
-                        currentPrice = price;
-                        trades.push(price);
-                        break;
+                const allElements = document.querySelectorAll('*');
+                for (const el of allElements) {
+                    if (el.children.length === 0) { // Only leaf elements
+                        const text = el.textContent.trim();
+                        if (/^\d+\.\d{4,8}$/.test(text)) { // Price-like format
+                            const price = parseFloat(text);
+                            if (price > 0.0001 && price < 1000000) { // Reasonable price range
+                                currentPrice = price;
+                                trades.push(price);
+                                break;
+                            }
+                        }
                     }
                 }
             }
@@ -990,9 +1236,38 @@
                 });
             }
             
-            // Log for debugging
+            // Method 3: Wait for chart elements to load
+            if (!currentPrice) {
+                // Try to find any price-like span elements
+                const allSpans = document.querySelectorAll('span');
+                for (const span of allSpans) {
+                    const text = span.textContent.trim();
+                    if (/^0\.[0-9]{4,8}$/.test(text)) {
+                        const price = parseFloat(text);
+                        if (price > 0.0001 && price < 10) {
+                            currentPrice = price;
+                            trades.push(price);
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            // Enhanced debugging
             if (!currentPrice && trades.length === 0) {
-                console.log('No price found - check selectors');
+                const chartContainer = document.querySelector('.chart-title-indicator-container');
+                const closeEl = document.querySelector('span[key="c"]');
+                const allKeySpans = document.querySelectorAll('span[key]');
+                const priceSpans = Array.from(document.querySelectorAll('span')).filter(s => 
+                    /^0\.[0-9]{4,8}$/.test(s.textContent.trim()));
+                
+                console.log('Chart container found:', !!chartContainer);
+                console.log('Close element found:', !!closeEl);
+                console.log('Spans with key attribute:', allKeySpans.length);
+                console.log('Price-like spans found:', priceSpans.length);
+                if (priceSpans.length > 0) {
+                    console.log('Sample price spans:', priceSpans.slice(0, 3).map(s => s.textContent));
+                }
             }
             
             return { currentPrice: currentPrice || trades[0], trades: trades.slice(0, 10) };
@@ -1110,9 +1385,12 @@
             }
         }
 
-        // Update every 10ms for real-time candle data
+        // Update every 10ms for maximum speed without overwhelming
         setInterval(updateDisplay, 10);
         updateDisplay();
+        
+        // Force initial chart hover
+        setTimeout(triggerChartHover, 500);
     }
 
     if (document.readyState === 'loading') {
