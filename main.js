@@ -380,13 +380,14 @@
         
         // Ensure sell price field is visible
         function ensureSellPriceFieldVisible() {
-            const limitTotalInputs = document.querySelectorAll('input#limitTotal');
-            const hasSellPriceField = limitTotalInputs.length >= 2;
+            // Look for the hidden sell price field
+            const hiddenSellField = document.querySelector('div[style*="display: none"] input[placeholder="Limit Sell"]');
+            const isHidden = !!hiddenSellField;
             
-            console.log('Sell price field check - limitTotal inputs found:', limitTotalInputs.length);
+            console.log('Sell price field hidden:', isHidden);
             
-            if (!hasSellPriceField) {
-                console.log('Sell price field not visible - need to check Reverse Order');
+            if (isHidden) {
+                console.log('Sell price field is hidden - need to check Reverse Order');
                 ensureCheckboxChecked();
                 return false;
             }
@@ -397,36 +398,27 @@
         
         // Ensure Reverse Order checkbox is checked
         function ensureCheckboxChecked() {
-            // Try multiple selectors for the checkbox
-            const checkboxSelectors = [
-                'div[role="checkbox"]',
-                '.bn-checkbox',
-                '[aria-checked]'
-            ];
+            // Find checkbox by looking for the exact structure
+            const checkboxes = document.querySelectorAll('div[role="checkbox"]');
+            let reverseOrderCheckbox = null;
             
-            let checkboxContainer = null;
-            for (const selector of checkboxSelectors) {
-                const elements = document.querySelectorAll(selector);
-                for (const el of elements) {
-                    // Look for checkbox near "Reverse Order" text
-                    const parent = el.closest('div');
-                    if (parent && parent.textContent.includes('Reverse')) {
-                        checkboxContainer = el;
-                        break;
-                    }
+            for (const checkbox of checkboxes) {
+                const nextSibling = checkbox.nextElementSibling;
+                if (nextSibling && nextSibling.textContent.includes('Reverse Order')) {
+                    reverseOrderCheckbox = checkbox;
+                    break;
                 }
-                if (checkboxContainer) break;
             }
             
-            if (checkboxContainer) {
-                const isChecked = checkboxContainer.getAttribute('aria-checked') === 'true';
-                console.log('Reverse Order checkbox found, aria-checked:', checkboxContainer.getAttribute('aria-checked'));
+            if (reverseOrderCheckbox) {
+                const isChecked = reverseOrderCheckbox.getAttribute('aria-checked') === 'true';
+                console.log('Reverse Order checkbox found, aria-checked:', reverseOrderCheckbox.getAttribute('aria-checked'));
                 
                 if (isChecked) {
                     console.log('Reverse Order already checked - no action needed');
                 } else {
                     console.log('Reverse Order unchecked - clicking to check it');
-                    humanClick(checkboxContainer);
+                    humanClick(reverseOrderCheckbox);
                 }
             } else {
                 console.log('Reverse Order checkbox not found');
