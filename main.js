@@ -320,15 +320,21 @@
                     return 'completed';
                 }
                 
-                // Cancel stuck Buy order after 10 seconds
-                if (checkCount >= 10 && orderText.includes('Buy')) {
-                    console.log('Buy order stuck for 10s, canceling...');
-                    const cancelBtn = getXPathElement('/html/body/div[4]/div/div[3]/div/div[8]/div/div/div/div/div[2]/div[1]/div/div[3]/div/div/div[1]/table/thead/tr/th[9]/div');
-                    if (cancelBtn) {
-                        humanClick(cancelBtn);
-                        await new Promise(r => setTimeout(r, 200));
-                        await clickCancelConfirmWithRetry();
-                        return 'cancelled';
+                // Handle stuck orders after 10 seconds
+                if (checkCount >= 10) {
+                    if (orderText.includes('Buy')) {
+                        console.log('Buy order stuck for 10s, canceling...');
+                        const cancelBtn = getXPathElement('/html/body/div[4]/div/div[3]/div/div[8]/div/div/div/div/div[2]/div[1]/div/div[3]/div/div/div[1]/table/thead/tr/th[9]/div');
+                        if (cancelBtn) {
+                            humanClick(cancelBtn);
+                            await new Promise(r => setTimeout(r, 200));
+                            await clickCancelConfirmWithRetry();
+                            return 'cancelled';
+                        }
+                    } else if (orderText.includes('Sell')) {
+                        console.log('Sell order stuck for 10s, placing cleanup order...');
+                        await cleanupStuckSellOrder();
+                        return 'cleanup';
                     }
                 }
                 
@@ -391,6 +397,12 @@
             
             startBtn.style.display = 'none';
             pauseBtn.style.display = 'inline-block';
+            
+            // Initial cleanup check
+            statusEl.textContent = 'Checking for existing orders...';
+            statusEl.style.color = '#FFD700';
+            await cleanupExistingSellOrders();
+            await new Promise(r => setTimeout(r, 500));
             
             for (let i = 0; i < tradesCount; i++) {
                 if (!isExecuting) break;
@@ -586,6 +598,191 @@
             return false;
         }
         
+        // Get current token from URL
+        function getCurrentToken() {
+            const url = window.location.href;
+            const match = url.match(/\/([A-Z]+)$/);
+            return match ? match[1] : null;
+        }
+        
+        // Check and cleanup existing sell orders before starting
+        async function cleanupExistingSellOrders() {
+            console.log('Checking for existing sell orders...');
+            
+            const orderSection = getXPathElement('/html/body/div[4]/div/div[3]/div/div[8]/div/div/div/div/div[2]/div[1]/div');
+            if (!orderSection) {
+                console.log('Order section not found, skipping cleanup');
+                return false;
+            }
+            
+            const orderText = orderSection.textContent;
+            console.log('Order section text:', orderText);
+            
+            // Get current token
+            const currentToken = getCurrentToken();
+            console.log('Current token:', currentToken);
+            
+            // Check if multiple token types exist and click Hide Other Tokens
+            const hideOtherTokensBtn = document.querySelector('#trade-history-hide-other-pairs');
+            if (hideOtherTokensBtn && orderText.split('Sell').length > 2) {
+                console.log('Multiple tokens detected, clicking Hide Other Tokens');
+                humanClick(hideOtherTokensBtn);
+                await new Promise(r => setTimeout(r, 1000));
+            }
+            
+            // Check if current token has sell orders
+            if (orderText.includes('Sell')) {
+                console.log('Sell orders detected in Open Orders');
+                console.log('Current token check:', currentToken, 'Order contains token:', !currentToken || orderText.includes(currentToken));
+                
+                if (!currentToken || orderText.includes(currentToken)) {
+                    console.log('Existing sell orders found for current token, cleaning up...');
+                    await cleanupStuckSellOrder();
+                    // Wait max 30 seconds for cleanup completion
+                    let cleanupWait = 0;
+                    while (cleanupWait < 30) {
+                        await new Promise(r => setTimeout(r, 1000));
+                        cleanupWait++;
+                        const updatedSection = getXPathElement('/html/body/div[4]/div/div[3]/div/div[8]/div/div/div/div/div[2]/div[1]/div');
+                        if (updatedSection && updatedSection.textContent.includes('No Ongoing Orders')) {
+                            console.log('Cleanup completed');
+                            break;
+                        }
+                    }
+                    return true;
+                } else {
+                    console.log('Sell orders found but not for current token, skipping cleanup');
+                }
+            }
+            
+            console.log('No existing sell orders found for current token');
+            return false;
+        }
+        
+        // Cleanup stuck sell order by placing aggressive sell
+        async function cleanupStuckSellOrder() {
+            console.log('Cleaning up stuck sell order...');
+            
+            // FIRST: Click existing Cancel All button on UI
+            const cancelAllBtn = getXPathElement('/html/body/div[4]/div/div[3]/div/div[8]/div/div/div/div/div[2]/div[1]/div/div[3]/div/div/div[1]/table/thead/tr/th[9]/div') ||
+                               document.querySelector('th.bn-web-table-cell:nth-child(9)');
+            if (cancelAllBtn) {
+                console.log('Clicking existing Cancel All button');
+                humanClick(cancelAllBtn);
+                await new Promise(r => setTimeout(r, 500));
+                await clickCancelConfirmWithRetry();
+                await new Promise(r => setTimeout(r, 1000));
+            } else {
+                console.log('Cancel All button not found');
+            }
+            
+            // Switch to sell panel
+            const sellTab = document.querySelector('div.bn-tab__buySell:nth-child(2)');
+            if (sellTab) {
+                console.log('Clicking Sell tab:', sellTab);
+                humanClick(sellTab);
+                await new Promise(r => setTimeout(r, 1000));
+            } else {
+                console.log('Sell tab not found!');
+                return;
+            }
+            
+            // Ensure Reverse Order is unchecked (we want to sell tokens for USDT)
+            const checkboxContainer = document.querySelector('.bn-checkbox.bn-checkbox__square.checked') || 
+                                    document.querySelector('[data-testid="reverse-order-checkbox"].checked') ||
+                                    getXPathElement('/html/body/div[4]/div/div[3]/div/div[9]/div/div/div/div/div[3]/div[5]/div[1]/div[1]/div');
+            
+            if (checkboxContainer) {
+                const checkbox = checkboxContainer.querySelector('input[type="checkbox"]');
+                if (checkbox && checkbox.checked) {
+                    console.log('Unchecking Reverse Order for token sale');
+                    humanClick(checkboxContainer);
+                    await new Promise(r => setTimeout(r, 300));
+                } else {
+                    console.log('Reverse Order already unchecked');
+                }
+            } else {
+                console.log('Reverse Order checkbox not found');
+            }
+            
+            // Set slider to 100% using multiple approaches
+            const sliderContainer = getXPathElement('/html/body/div[4]/div/div[3]/div/div[9]/div/div/div/div/div[3]/div[3]');
+            if (sliderContainer) {
+                // Try method 1: Find and click 100% button
+                const maxButton = sliderContainer.querySelector('[data-testid="100%"], .bn-slider-step:last-child, .slider-step-100');
+                if (maxButton) {
+                    console.log('Clicking 100% button');
+                    humanClick(maxButton);
+                    await new Promise(r => setTimeout(r, 300));
+                } else {
+                    // Try method 2: Find slider input and set value
+                    const sliderInput = sliderContainer.querySelector('input[type="range"], .bn-slider-input');
+                    if (sliderInput) {
+                        console.log('Setting slider input to max value');
+                        setReactValue(sliderInput, sliderInput.max || '100');
+                        await new Promise(r => setTimeout(r, 300));
+                    } else {
+                        // Try method 3: Enhanced drag simulation
+                        const slider = sliderContainer.querySelector('.bn-slider, .slider-track, [role="slider"]');
+                        if (slider) {
+                            console.log('Enhanced drag simulation to 100%');
+                            const rect = slider.getBoundingClientRect();
+                            const startX = rect.left + 5;
+                            const endX = rect.right - 5;
+                            const centerY = rect.top + rect.height / 2;
+                            
+                            // Focus first
+                            slider.focus();
+                            await new Promise(r => setTimeout(r, 100));
+                            
+                            // Enhanced drag with proper event sequence
+                            slider.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, clientX: startX, clientY: centerY }));
+                            slider.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, clientX: startX, clientY: centerY }));
+                            slider.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, buttons: 1, clientX: startX, clientY: centerY }));
+                            
+                            // Multiple move events for smooth drag
+                            for (let i = 0; i <= 10; i++) {
+                                const currentX = startX + (endX - startX) * (i / 10);
+                                slider.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, button: 0, buttons: 1, clientX: currentX, clientY: centerY }));
+                                await new Promise(r => setTimeout(r, 10));
+                            }
+                            
+                            slider.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0, buttons: 0, clientX: endX, clientY: centerY }));
+                            slider.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: endX, clientY: centerY }));
+                            await new Promise(r => setTimeout(r, 300));
+                        } else {
+                            console.log('No slider element found!');
+                        }
+                    }
+                }
+            } else {
+                console.log('Slider container not found!');
+            }
+            
+            // Click sell button directly (skip price input)
+            const sellButton = document.querySelector('.bn-button.bn-button__sell');
+            if (sellButton) {
+                console.log('Clicking Sell button');
+                simulateMouseMove(sellButton);
+                await new Promise(r => setTimeout(r, randomDelay(30, 50)));
+                humanClick(sellButton);
+                await new Promise(r => setTimeout(r, randomDelay(150, 200)));
+                await clickConfirmWithRetry();
+            } else {
+                console.log('Sell button not found!');
+            }
+            
+            // Switch back to buy panel
+            await new Promise(r => setTimeout(r, 500));
+            const buyTab = document.querySelector('div.bn-tab__buySell:nth-child(1)');
+            if (buyTab) {
+                humanClick(buyTab);
+                await new Promise(r => setTimeout(r, 300));
+            }
+            
+            console.log('Cleanup order placed');
+        }
+        
         // Monitor order and cancel if not filled
         async function monitorOrder() {
             await new Promise(r => setTimeout(r, 5000));
@@ -751,9 +948,10 @@
             const { currentPrice, trades } = getMarketData();
             if (!currentPrice) return null;
             
-            const recentPrices = [];
+            const recentBuyPrices = [];
+            const recentSellPrices = [];
             
-            // Get recent trade prices
+            // Get recent trade prices separated by type
             const tradeBookEl = getXPathElement('/html/body/div[4]/div/div[3]/div/div[7]/div/div/div');
             if (tradeBookEl) {
                 const rows = tradeBookEl.querySelectorAll('[role="gridcell"]');
@@ -762,7 +960,10 @@
                     if (priceEl) {
                         const price = parseFloat(priceEl.textContent);
                         if (!isNaN(price) && price > 0) {
-                            recentPrices.push(price);
+                            const isBuy = priceEl.style.color.includes('Buy');
+                            const isSell = priceEl.style.color.includes('Sell');
+                            if (isBuy) recentBuyPrices.push(price);
+                            if (isSell) recentSellPrices.push(price);
                         }
                     }
                 });
@@ -770,36 +971,23 @@
             
             let buyPrice, sellPrice;
             
-            if (recentPrices.length > 3) {
-                // Calculate spread and volatility
-                const maxPrice = Math.max(...recentPrices);
-                const minPrice = Math.min(...recentPrices);
-                const avgPrice = recentPrices.reduce((sum, p) => sum + p, 0) / recentPrices.length;
-                const priceRange = maxPrice - minPrice;
+            if (recentBuyPrices.length > 0 && recentSellPrices.length > 0) {
+                // Buy: slightly above highest recent buy (guaranteed fill)
+                const highestBuy = Math.max(...recentBuyPrices);
+                buyPrice = highestBuy * 1.0001; // 0.01% above
                 
-                // Standard deviation for volatility
-                const variance = recentPrices.reduce((sum, p) => sum + Math.pow(p - avgPrice, 2), 0) / recentPrices.length;
-                const stdDev = Math.sqrt(variance);
-                
-                // Spread estimate and volatility buffer
-                const spreadEstimate = priceRange / 2;
-                const volatilityBuffer = stdDev * 1.5;
-                const slippage = Math.max(spreadEstimate, volatilityBuffer);
-                
-                // Target loss: ~$1.5 per $8000 = 0.01875% ≈ 0.02%
-                const targetLossRate = 0.0002; // 0.02% loss rate
-                const minGap = currentPrice * targetLossRate * 2; // *2 because gap is split between buy and sell
-                
-                // Final gap = max(minGap, slippage)
-                const finalGap = Math.max(minGap, slippage);
-                
-                buyPrice = currentPrice + (finalGap / 2);
-                sellPrice = currentPrice - (finalGap / 2);
+                // Sell: at or below lowest recent sell (guaranteed fill)
+                const lowestSell = Math.min(...recentSellPrices);
+                sellPrice = Math.min(lowestSell * 0.9999, currentPrice * 0.9998); // Ensure below market
             } else {
-                // Fallback: 0.03% offset
+                // Fallback: fixed offsets
                 buyPrice = currentPrice * 1.0003;
                 sellPrice = currentPrice * 0.9997;
             }
+            
+            // Safety: ensure sell < market < buy
+            if (sellPrice >= currentPrice) sellPrice = currentPrice * 0.9998;
+            if (buyPrice <= currentPrice) buyPrice = currentPrice * 1.0002;
             
             const lossPercent = ((buyPrice - sellPrice) / buyPrice * 100).toFixed(3);
             const spread = ((buyPrice - sellPrice) / sellPrice * 100).toFixed(4);
