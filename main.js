@@ -99,6 +99,11 @@
         let originalContent = '';
         
         let currentCount = 0;
+        let balanceBeforeTrade = 0;
+        
+        // Telegram configuration
+        const TELEGRAM_BOT_TOKEN = '8394008255:AAH7r1AHxSYx8iFFP32mfUOvOWg3o_NocxA';
+        const TELEGRAM_CHAT_ID = '@LeonTradingBot';
         
         // Enhanced WebSocket and data interception
         function interceptWebSocket() {
@@ -308,33 +313,41 @@
         
         // Update overlay content structure
         const overlayHTML = `
-            <div style="margin-bottom:4px;">Balance: <span id="balance">-</span> USDT</div>
-            <div style="margin-bottom:4px;">Market: <span id="market-price">Loading...</span></div>
-            <div style="margin-bottom:4px;">Amount: <input id="trade-amount" type="number" value="1" style="width:60px; padding:2px 4px; background:#333; color:white; border:1px solid #555; border-radius:3px;" /> USDT</div>
-            <div style="display:flex; align-items:center; gap:4px; margin-bottom:4px;">
-                <div style="flex:1;">Buy: <span id="buy-price">-</span></div>
-                <button id="fill-buy" style="padding:4px 8px; cursor:pointer; background:#4CAF50; border:none; border-radius:4px; color:white; font-size:12px;">Fill</button>
-                <button id="auto-buy" style="padding:4px 8px; cursor:pointer; background:#2E7D32; border:none; border-radius:4px; color:white; font-size:12px;">Buy</button>
+            <div style="font-size:11px; margin-bottom:4px;">
+                Nickname: <input id="user-nickname" type="text" placeholder="Enter name" value="${localStorage.getItem('traderNickname') || ''}" style="width:100px; padding:2px; background:#333; color:white; border:1px solid #555; border-radius:3px; font-size:11px;" />
             </div>
-            <div style="margin-bottom:4px;">Sell: <span id="sell-price">-</span></div>
-            <div style="margin-bottom:4px;">Loss: <span id="loss-percent">-</span> | Spread: <span id="spread-info">-</span></div>
-            <div style="margin-bottom:4px;">Est. Loss: <span id="loss-usdt">-</span> USDT</div>
-            <div style="margin-bottom:4px; padding-top:4px; border-top:1px solid #444;">
-                Max Loss: <input id="max-loss" type="number" value="10" step="0.1" style="width:50px; padding:2px 4px; background:#333; color:white; border:1px solid #555; border-radius:3px;" /> USDT
+            <div style="font-size:20px; font-weight:bold; margin-bottom:8px;">
+                <div style="margin-bottom:4px;">Market: <span id="market-price" style="color:#FFD700;">Loading...</span></div>
+                <div style="margin-bottom:4px;">Buy: <span id="buy-price" style="color:#4CAF50;">-</span></div>
+                <div style="margin-bottom:4px;">Sell: <span id="sell-price" style="color:#FF6B6B;">-</span></div>
+                <div style="margin-bottom:4px;">Loss: <span id="loss-percent" style="color:#FF9800;">-</span></div>
             </div>
-            <div style="margin-bottom:4px;">
-                Max/Hr: <input id="max-trades-hour" type="number" value="30" min="1" style="width:50px; padding:2px 4px; background:#333; color:white; border:1px solid #555; border-radius:3px;" /> trades
+            <div style="font-size:18px; font-weight:bold; color:#FF0000; margin-bottom:8px; padding:8px; background:rgba(255,0,0,0.1); border-radius:4px;">
+                Total Loss: <span id="total-loss-display">0.000000</span> USDT
             </div>
-            <div style="margin-bottom:4px;">
-                Delay: <input id="trade-delay" type="number" value="4" min="1" max="10" style="width:50px; padding:2px 4px; background:#333; color:white; border:1px solid #555; border-radius:3px;" /> sec
+            <div style="font-size:11px; color:#999; margin-bottom:4px;">
+                Balance: <span id="balance">-</span> | Spread: <span id="spread-info">-</span>
             </div>
-            <div style="display:flex; align-items:center; gap:4px; margin-top:8px; padding-top:8px; border-top:1px solid #555;">
-                <div style="flex:1;">Trades: <input id="bulk-trades" type="number" value="10" min="1" style="width:50px; padding:2px 4px; background:#333; color:white; border:1px solid #555; border-radius:3px;" /></div>
-                <button id="bulk-start" style="padding:4px 12px; cursor:pointer; background:#FF9800; border:none; border-radius:4px; color:white; font-size:12px; font-weight:bold;">Start</button>
-                <button id="bulk-pause" style="padding:4px 12px; cursor:pointer; background:#F44336; border:none; border-radius:4px; color:white; font-size:12px; font-weight:bold; display:none;">Pause</button>
+            <div style="font-size:11px; margin-bottom:4px;">
+                Amount: <input id="trade-amount" type="number" value="1" style="width:50px; padding:2px; background:#333; color:white; border:1px solid #555; border-radius:3px; font-size:11px;" /> USDT
             </div>
-            <div id="bulk-total-loss" style="margin-top:4px; font-size:12px; color:#FF6B6B;"></div>
-            <div id="bulk-status" style="margin-top:4px; font-size:12px; color:#FFD700;"></div>
+            <div style="display:flex; gap:4px; margin-bottom:4px;">
+                <button id="fill-buy" style="padding:4px 8px; cursor:pointer; background:#4CAF50; border:none; border-radius:4px; color:white; font-size:11px;">Fill</button>
+                <button id="auto-buy" style="padding:4px 8px; cursor:pointer; background:#2E7D32; border:none; border-radius:4px; color:white; font-size:11px;">Buy</button>
+            </div>
+            <div style="font-size:11px; margin-bottom:2px;">
+                Max Loss: <input id="max-loss" type="number" value="10" step="0.1" style="width:40px; padding:2px; background:#333; color:white; border:1px solid #555; border-radius:3px; font-size:11px;" />
+                Max/Hr: <input id="max-trades-hour" type="number" value="300" min="1" style="width:40px; padding:2px; background:#333; color:white; border:1px solid #555; border-radius:3px; font-size:11px;" />
+                Delay: <input id="trade-delay" type="number" value="4" min="1" max="10" style="width:35px; padding:2px; background:#333; color:white; border:1px solid #555; border-radius:3px; font-size:11px;" />s
+            </div>
+            <div style="display:flex; align-items:center; gap:4px; margin-top:6px; padding-top:6px; border-top:1px solid #555;">
+                <input id="bulk-trades" type="number" value="10" min="1" style="width:40px; padding:2px; background:#333; color:white; border:1px solid #555; border-radius:3px; font-size:11px;" />
+                <button id="bulk-start" style="padding:4px 10px; cursor:pointer; background:#FF9800; border:none; border-radius:4px; color:white; font-size:11px; font-weight:bold;">Start</button>
+                <button id="bulk-pause" style="padding:4px 10px; cursor:pointer; background:#F44336; border:none; border-radius:4px; color:white; font-size:11px; font-weight:bold; display:none;">Pause</button>
+                <button id="bulk-stop" style="padding:4px 10px; cursor:pointer; background:#D32F2F; border:none; border-radius:4px; color:white; font-size:11px; font-weight:bold; display:none;">Stop</button>
+                <button id="clear-history" style="padding:4px 10px; cursor:pointer; background:#9C27B0; border:none; border-radius:4px; color:white; font-size:11px;">Clear</button>
+            </div>
+            <div id="bulk-status" style="margin-top:4px; font-size:11px; color:#FFD700;"></div>
         `;
         document.getElementById('trading-overlay-content').innerHTML = overlayHTML;
         originalContent = overlayHTML;
@@ -469,10 +482,43 @@
         });
         
         // Prevent inputs from triggering drag
-        ['trade-amount', 'bulk-trades', 'bulk-pause', 'max-loss', 'max-trades-hour', 'trade-delay'].forEach(id => {
+        ['user-nickname', 'trade-amount', 'bulk-trades', 'bulk-pause', 'bulk-stop', 'max-loss', 'max-trades-hour', 'trade-delay', 'clear-history'].forEach(id => {
             const el = document.getElementById(id);
             if (el) el.addEventListener('mousedown', (e) => e.stopPropagation());
         });
+        
+        // Save nickname to localStorage on change
+        document.getElementById('user-nickname').addEventListener('input', (e) => {
+            localStorage.setItem('traderNickname', e.target.value);
+        });
+        
+        // Clear history button
+        document.getElementById('clear-history').addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (confirm('Clear all trade history?')) {
+                localStorage.removeItem('binanceTrades');
+                document.getElementById('total-loss-display').textContent = '0.000000';
+                alert('Trade history cleared!');
+            }
+        });
+        
+        // Send message to Telegram
+        async function sendTelegramMessage(message) {
+            try {
+                const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+                await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        chat_id: TELEGRAM_CHAT_ID,
+                        text: message,
+                        parse_mode: 'HTML'
+                    })
+                });
+            } catch (e) {
+                console.log('Telegram send error:', e);
+            }
+        }
         
         // Get trading fee in tokens and convert to USDT
         function getTradingFeeUSDT(marketPrice) {
@@ -559,7 +605,7 @@
         
         function getTotalLossFromStorage() {
             const trades = JSON.parse(localStorage.getItem('binanceTrades') || '[]');
-            return trades.reduce((sum, t) => sum + parseFloat(t.lossUSDT || 0), 0);
+            return trades.reduce((sum, t) => sum + parseFloat(t.actualLoss || 0), 0);
         }
         
         function getTradesInLastHour() {
@@ -588,6 +634,7 @@
         // Bulk trade execution
         let isExecuting = false;
         let isPaused = false;
+        let completedTradesCount = 0;
         async function executeBulkTrades() {
             if (isExecuting) {
                 console.log('Already executing, stopping current execution');
@@ -598,6 +645,7 @@
             console.log('Starting new bulk trade execution');
             isExecuting = true;
             isPaused = false;
+            completedTradesCount = 0;
             
             const tradesCount = parseInt(document.getElementById('bulk-trades').value) || 10;
             const statusEl = document.getElementById('bulk-status');
@@ -607,6 +655,7 @@
             
             startBtn.style.display = 'none';
             pauseBtn.style.display = 'inline-block';
+            document.getElementById('bulk-stop').style.display = 'inline-block';
             
             // Initial cleanup check
             statusEl.textContent = 'Checking for existing orders...';
@@ -669,11 +718,8 @@
                     break;
                 }
                 
-                const feeUSDT = getTradingFeeUSDT(parseFloat(prices.market));
-                const lossUSDT = (amount * parseFloat(prices.loss) / 100 + feeUSDT).toFixed(6);
-                const totalLossSoFar = getTotalLossFromStorage();
-                
-                totalLossEl.textContent = `Total Loss: ${totalLossSoFar.toFixed(6)} USDT | This: ${lossUSDT} USDT`;
+                // Store balance before trade
+                balanceBeforeTrade = window.currentBalance;
                 
                 // Ensure sell price field is visible before proceeding
                 if (!ensureSellPriceFieldVisible()) {
@@ -739,6 +785,11 @@
                         statusEl.textContent = `Trade ${i + 1}/${tradesCount}: ${result}`;
                     }
                     
+                    // Calculate actual loss from balance delta
+                    await new Promise(r => setTimeout(r, 1000)); // Wait for balance update
+                    const balanceAfterTrade = window.currentBalance;
+                    const actualLoss = balanceBeforeTrade - balanceAfterTrade;
+                    
                     // Save trade data
                     const tradeData = {
                         timestamp: new Date().toISOString(),
@@ -747,12 +798,12 @@
                         sellPrice: prices.sell,
                         amount: amount,
                         lossPercent: prices.loss,
-                        feeUSDT: feeUSDT.toFixed(6),
-                        lossUSDT: lossUSDT,
+                        actualLoss: actualLoss.toFixed(6),
                         result: result,
                         slippage: slippage.toFixed(3)
                     };
                     saveTradeToStorage(tradeData);
+                    if (result === 'completed') completedTradesCount++;
                     
                     // Random delay after successful trade
                     if (result === 'completed') {
@@ -767,13 +818,35 @@
             }
             
             const finalLoss = getTotalLossFromStorage();
+            const wasCompleted = isExecuting; // Check if completed naturally or stopped
             statusEl.textContent = `Completed! Total Loss: ${finalLoss.toFixed(6)} USDT`;
             statusEl.style.color = '#4CAF50';
             startBtn.style.display = 'inline-block';
             pauseBtn.style.display = 'none';
+            document.getElementById('bulk-stop').style.display = 'none';
             isExecuting = false;
             isPaused = false;
             console.log('Bulk trading completed, stopping execution');
+            
+            // Send Telegram notification only if completed naturally
+            if (wasCompleted && completedTradesCount > 0) {
+                const nickname = localStorage.getItem('traderNickname') || 'Trader';
+                const trades = JSON.parse(localStorage.getItem('binanceTrades') || '[]');
+                const recentTrades = trades.slice(-tradesCount);
+                const cancelledCount = recentTrades.filter(t => t.result === 'cancelled').length;
+                const totalLoss = recentTrades.reduce((sum, t) => sum + parseFloat(t.actualLoss || 0), 0);
+                
+                const message = `<b>[${nickname}]</b> - ${new Date().toLocaleString()}\n\n` +
+                    `🤖 <b>Trading Session Completed</b>\n\n` +
+                    `📊 Total Trades: ${tradesCount}\n` +
+                    `✅ Completed: ${completedTradesCount}\n` +
+                    `❌ Cancelled: ${cancelledCount}\n` +
+                    `💰 Session Loss: ${totalLoss.toFixed(6)} USDT\n` +
+                    `📈 Cumulative Loss: ${finalLoss.toFixed(6)} USDT`;
+                
+                sendTelegramMessage(message);
+            }
+            
             setTimeout(() => {
                 statusEl.textContent = '';
                 statusEl.style.color = '#FFD700';
@@ -797,6 +870,30 @@
                     e.target.textContent = 'Resume';
                     e.target.style.background = '#4CAF50';
                 }
+            }
+        });
+        
+        document.getElementById('bulk-stop').addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (isExecuting) {
+                isExecuting = false;
+                isPaused = false;
+                completedTradesCount = 0; // Reset counter
+                const statusEl = document.getElementById('bulk-status');
+                const startBtn = document.getElementById('bulk-start');
+                const pauseBtn = document.getElementById('bulk-pause');
+                const stopBtn = document.getElementById('bulk-stop');
+                
+                statusEl.textContent = 'STOPPED by user';
+                statusEl.style.color = '#FF0000';
+                startBtn.style.display = 'inline-block';
+                pauseBtn.style.display = 'none';
+                stopBtn.style.display = 'none';
+                
+                setTimeout(() => {
+                    statusEl.textContent = '';
+                    statusEl.style.color = '#FFD700';
+                }, 3000);
             }
         });
         
@@ -1380,11 +1477,22 @@
                     if (!isNaN(balanceNum)) {
                         window.currentBalance = balanceNum;
                         const balanceSpan = document.getElementById('balance');
-                        if (balanceSpan) balanceSpan.textContent = balanceNum.toFixed(8);
+                        if (balanceSpan) balanceSpan.textContent = balanceNum.toFixed(2);
                     }
                 }
             } catch (e) {
                 console.log('Balance update error:', e);
+            }
+            
+            // Update total loss display
+            try {
+                const totalLossEl = document.getElementById('total-loss-display');
+                if (totalLossEl) {
+                    const totalLoss = getTotalLossFromStorage();
+                    totalLossEl.textContent = totalLoss.toFixed(6);
+                }
+            } catch (e) {
+                console.log('Total loss update error:', e);
             }
             
             try {
@@ -1395,7 +1503,6 @@
                     const buyEl = document.getElementById('buy-price');
                     const sellEl = document.getElementById('sell-price');
                     const lossPercentEl = document.getElementById('loss-percent');
-                    const lossUsdtEl = document.getElementById('loss-usdt');
                     const spreadEl = document.getElementById('spread-info');
                     
                     if (marketEl) marketEl.textContent = prices.market;
@@ -1403,15 +1510,6 @@
                     if (sellEl) sellEl.textContent = prices.sell;
                     if (lossPercentEl) lossPercentEl.textContent = prices.loss + '%';
                     if (spreadEl) spreadEl.textContent = prices.spread + '%';
-                    
-                    // Calculate estimated loss in USDT (including fee)
-                    const amountInput = document.getElementById('trade-amount');
-                    if (amountInput && lossUsdtEl) {
-                        const amount = parseFloat(amountInput.value) || 1;
-                        const feeUSDT = getTradingFeeUSDT(parseFloat(prices.market));
-                        const lossUSDT = (amount * parseFloat(prices.loss) / 100 + feeUSDT).toFixed(6);
-                        lossUsdtEl.textContent = lossUSDT;
-                    }
                 } else {
                     const marketEl = document.getElementById('market-price');
                     if (marketEl) marketEl.textContent = 'No data';
