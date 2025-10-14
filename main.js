@@ -830,6 +830,8 @@
             if (buyTab) {
                 humanClick(buyTab);
                 await new Promise(r => setTimeout(r, 300));
+                // Ensure Reverse Order is checked for buy orders
+                ensureCheckboxChecked();
             }
             
             console.log('Cleanup order placed');
