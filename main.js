@@ -165,6 +165,9 @@
             <div style="margin-bottom:4px;">
                 Max/Hr: <input id="max-trades-hour" type="number" value="30" min="1" style="width:50px; padding:2px 4px; background:#333; color:white; border:1px solid #555; border-radius:3px;" /> trades
             </div>
+            <div style="margin-bottom:4px;">
+                Delay: <input id="trade-delay" type="number" value="4" min="1" max="10" style="width:50px; padding:2px 4px; background:#333; color:white; border:1px solid #555; border-radius:3px;" /> sec
+            </div>
             <div style="display:flex; align-items:center; gap:4px; margin-top:8px; padding-top:8px; border-top:1px solid #555;">
                 <div style="flex:1;">Trades: <input id="bulk-trades" type="number" value="10" min="1" style="width:50px; padding:2px 4px; background:#333; color:white; border:1px solid #555; border-radius:3px;" /></div>
                 <button id="bulk-start" style="padding:4px 12px; cursor:pointer; background:#FF9800; border:none; border-radius:4px; color:white; font-size:12px; font-weight:bold;">Start</button>
@@ -273,7 +276,7 @@
         });
         
         // Prevent inputs from triggering drag
-        ['trade-amount', 'bulk-trades', 'bulk-pause', 'max-loss', 'max-trades-hour'].forEach(id => {
+        ['trade-amount', 'bulk-trades', 'bulk-pause', 'max-loss', 'max-trades-hour', 'trade-delay'].forEach(id => {
             const el = document.getElementById(id);
             if (el) el.addEventListener('mousedown', (e) => e.stopPropagation());
         });
@@ -507,9 +510,10 @@
                     };
                     saveTradeToStorage(tradeData);
                     
-                    // Random delay after successful trade (2-4 seconds)
+                    // Random delay after successful trade
                     if (result === 'completed') {
-                        const delay = 2000 + Math.random() * 2000;
+                        const maxDelay = parseInt(document.getElementById('trade-delay')?.value) || 4;
+                        const delay = 1000 + Math.random() * (maxDelay - 1) * 1000;
                         statusEl.textContent = `Trade ${i + 1}/${tradesCount}: Waiting ${(delay/1000).toFixed(1)}s...`;
                         await new Promise(r => setTimeout(r, delay));
                     } else {
@@ -747,65 +751,58 @@
             const { currentPrice, trades } = getMarketData();
             if (!currentPrice) return null;
             
-            const buyTrades = [];
-            const sellTrades = [];
+            const recentPrices = [];
             
-            // Get recent trades with volume and time weighting
+            // Get recent trade prices
             const tradeBookEl = getXPathElement('/html/body/div[4]/div/div[3]/div/div[7]/div/div/div');
             if (tradeBookEl) {
                 const rows = tradeBookEl.querySelectorAll('[role="gridcell"]');
-                rows.forEach((row, index) => {
+                rows.forEach(row => {
                     const priceEl = row.querySelector('.cursor-pointer');
-                    const amountEl = row.querySelector('.text-right');
-                    if (priceEl && amountEl) {
+                    if (priceEl) {
                         const price = parseFloat(priceEl.textContent);
-                        const amountText = amountEl.textContent.trim();
-                        const amount = parseFloat(amountText.replace('K', '')) * (amountText.includes('K') ? 1000 : 1) * (amountText.includes('M') ? 1000000 : 1);
-                        const timeDecay = Math.pow(0.95, index);
-                        
-                        if (!isNaN(price) && !isNaN(amount) && price > 0) {
-                            const weight = amount * timeDecay;
-                            const isBuy = priceEl.style.color.includes('Buy');
-                            const isSell = priceEl.style.color.includes('Sell');
-                            
-                            if (isBuy) buyTrades.push({ price, weight });
-                            if (isSell) sellTrades.push({ price, weight });
+                        if (!isNaN(price) && price > 0) {
+                            recentPrices.push(price);
                         }
                     }
                 });
             }
             
-            let buyPrice, sellPrice, spread;
+            let buyPrice, sellPrice;
             
-            if (buyTrades.length > 0 && sellTrades.length > 0) {
-                // Sort by weight (volume * time decay)
-                buyTrades.sort((a, b) => b.weight - a.weight);
-                sellTrades.sort((a, b) => b.weight - a.weight);
+            if (recentPrices.length > 3) {
+                // Calculate spread and volatility
+                const maxPrice = Math.max(...recentPrices);
+                const minPrice = Math.min(...recentPrices);
+                const avgPrice = recentPrices.reduce((sum, p) => sum + p, 0) / recentPrices.length;
+                const priceRange = maxPrice - minPrice;
                 
-                // Take top 30% most significant trades
-                const topBuyPrices = buyTrades.slice(0, Math.ceil(buyTrades.length * 0.3)).map(t => t.price);
-                const topSellPrices = sellTrades.slice(0, Math.ceil(sellTrades.length * 0.3)).map(t => t.price);
+                // Standard deviation for volatility
+                const variance = recentPrices.reduce((sum, p) => sum + Math.pow(p - avgPrice, 2), 0) / recentPrices.length;
+                const stdDev = Math.sqrt(variance);
                 
-                // Buy at lowest significant sell price
-                buyPrice = Math.min(...topSellPrices);
+                // Spread estimate and volatility buffer
+                const spreadEstimate = priceRange / 2;
+                const volatilityBuffer = stdDev * 1.5;
+                const slippage = Math.max(spreadEstimate, volatilityBuffer);
                 
-                // Sell at highest significant buy price
-                sellPrice = Math.max(...topBuyPrices);
+                // Target loss: ~$1.5 per $8000 = 0.01875% ≈ 0.02%
+                const targetLossRate = 0.0002; // 0.02% loss rate
+                const minGap = currentPrice * targetLossRate * 2; // *2 because gap is split between buy and sell
                 
-                spread = ((sellPrice - buyPrice) / buyPrice * 100).toFixed(4);
+                // Final gap = max(minGap, slippage)
+                const finalGap = Math.max(minGap, slippage);
                 
-                // Safety: ensure sell > buy
-                if (sellPrice <= buyPrice) {
-                    buyPrice = currentPrice * 1.00005;
-                    sellPrice = currentPrice * 0.99995;
-                }
+                buyPrice = currentPrice + (finalGap / 2);
+                sellPrice = currentPrice - (finalGap / 2);
             } else {
-                buyPrice = currentPrice * 1.00005;
-                sellPrice = currentPrice * 0.99995;
-                spread = '0.01';
+                // Fallback: 0.03% offset
+                buyPrice = currentPrice * 1.0003;
+                sellPrice = currentPrice * 0.9997;
             }
             
             const lossPercent = ((buyPrice - sellPrice) / buyPrice * 100).toFixed(3);
+            const spread = ((buyPrice - sellPrice) / sellPrice * 100).toFixed(4);
             
             return {
                 market: currentPrice.toFixed(8),
