@@ -291,7 +291,20 @@
                 }
             }
             
-            // Cancel stuck Buy order
+            // Check if stuck order is Buy or Sell
+            const orderSection = getXPathElement('/html/body/div[4]/div/div[3]/div/div[8]/div/div/div/div/div[2]/div[1]/div');
+            if (orderSection && orderSection.textContent.includes('Sell')) {
+                // Sell order - keep waiting indefinitely
+                while (true) {
+                    await new Promise(r => setTimeout(r, 1000));
+                    const section = getXPathElement('/html/body/div[4]/div/div[3]/div/div[8]/div/div/div/div/div[2]/div[1]/div');
+                    if (section && section.textContent.includes('No Ongoing Orders')) {
+                        return 'completed';
+                    }
+                }
+            }
+            
+            // Cancel stuck Buy order only
             const cancelBtn = getXPathElement('/html/body/div[4]/div/div[3]/div/div[8]/div/div/div/div/div[2]/div[1]/div/div[3]/div/div/div[1]/table/thead/tr/th[9]/div');
             if (cancelBtn) {
                 humanClick(cancelBtn);
@@ -505,16 +518,42 @@
                 }
             }
             
-            // Method 2: Main market price display
+            // Method 2: Top ticker price (alternative live price)
+            if (!currentPrice) {
+                const tickerPrice = document.querySelector('[class*="showPrice"]');
+                if (tickerPrice) {
+                    const price = parseFloat(tickerPrice.textContent.replace(/[^0-9.]/g, ''));
+                    if (!isNaN(price) && price > 0) {
+                        currentPrice = price;
+                        trades.push(price);
+                    }
+                }
+            }
+            
+            // Method 3: Main market price display via XPath
             if (!currentPrice) {
                 const priceXPath = '/html/body/div[4]/div/div[2]/div/div/div[2]/div[1]';
                 const mainPriceEl = getXPathElement(priceXPath);
                 if (mainPriceEl) {
-                    const priceText = mainPriceEl.textContent.trim().replace(/[$,]/g, '');
+                    const priceText = mainPriceEl.textContent.trim().replace(/[^0-9.]/g, '');
                     const price = parseFloat(priceText);
                     if (!isNaN(price) && price > 0) {
                         currentPrice = price;
                         trades.push(price);
+                    }
+                }
+            }
+            
+            // Method 4: Any element with large price-like number
+            if (!currentPrice) {
+                const priceElements = document.querySelectorAll('[class*="price"], [class*="Price"]');
+                for (const el of priceElements) {
+                    const text = el.textContent.trim().replace(/[^0-9.]/g, '');
+                    const price = parseFloat(text);
+                    if (!isNaN(price) && price > 0 && text.length > 3) {
+                        currentPrice = price;
+                        trades.push(price);
+                        break;
                     }
                 }
             }
@@ -539,6 +578,11 @@
                         if (!isNaN(price)) trades.push(price);
                     }
                 });
+            }
+            
+            // Log for debugging
+            if (!currentPrice && trades.length === 0) {
+                console.log('No price found - check selectors');
             }
             
             return { currentPrice: currentPrice || trades[0], trades: trades.slice(0, 10) };
