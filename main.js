@@ -378,16 +378,55 @@
             return min + Math.random() * (max - min);
         }
         
+        // Ensure sell price field is visible
+        function ensureSellPriceFieldVisible() {
+            const limitTotalInputs = document.querySelectorAll('input#limitTotal');
+            const hasSellPriceField = limitTotalInputs.length >= 2;
+            
+            console.log('Sell price field check - limitTotal inputs found:', limitTotalInputs.length);
+            
+            if (!hasSellPriceField) {
+                console.log('Sell price field not visible - need to check Reverse Order');
+                ensureCheckboxChecked();
+                return false;
+            }
+            
+            console.log('Sell price field is visible');
+            return true;
+        }
+        
         // Ensure Reverse Order checkbox is checked
         function ensureCheckboxChecked() {
-            const checkboxContainer = getXPathElement('/html/body/div[4]/div/div[3]/div/div[9]/div/div/div/div/div[3]/div[5]/div[1]/div[1]/div');
+            // Try multiple selectors for the checkbox
+            const checkboxSelectors = [
+                'div[role="checkbox"]',
+                '.bn-checkbox',
+                '[aria-checked]'
+            ];
+            
+            let checkboxContainer = null;
+            for (const selector of checkboxSelectors) {
+                const elements = document.querySelectorAll(selector);
+                for (const el of elements) {
+                    // Look for checkbox near "Reverse Order" text
+                    const parent = el.closest('div');
+                    if (parent && parent.textContent.includes('Reverse')) {
+                        checkboxContainer = el;
+                        break;
+                    }
+                }
+                if (checkboxContainer) break;
+            }
+            
             if (checkboxContainer) {
                 const isChecked = checkboxContainer.getAttribute('aria-checked') === 'true';
-                if (!isChecked) {
-                    console.log('Checking Reverse Order checkbox');
-                    humanClick(checkboxContainer);
+                console.log('Reverse Order checkbox found, aria-checked:', checkboxContainer.getAttribute('aria-checked'));
+                
+                if (isChecked) {
+                    console.log('Reverse Order already checked - no action needed');
                 } else {
-                    console.log('Reverse Order already checked');
+                    console.log('Reverse Order unchecked - clicking to check it');
+                    humanClick(checkboxContainer);
                 }
             } else {
                 console.log('Reverse Order checkbox not found');
@@ -644,8 +683,15 @@
                 
                 totalLossEl.textContent = `Total Loss: ${totalLossSoFar.toFixed(6)} USDT | This: ${lossUSDT} USDT`;
                 
-                ensureCheckboxChecked();
-                await new Promise(r => setTimeout(r, 100)); // Wait for checkbox
+                // Ensure sell price field is visible before proceeding
+                if (!ensureSellPriceFieldVisible()) {
+                    await new Promise(r => setTimeout(r, 300)); // Wait for UI update
+                    if (!ensureSellPriceFieldVisible()) {
+                        console.log('Sell price field still not visible after checkbox click');
+                        continue; // Skip this trade
+                    }
+                }
+                await new Promise(r => setTimeout(r, 100)); // Wait for UI stability
                 
                 const buyPriceInput = document.getElementById('limitPrice');
                 const limitTotalInputs = document.querySelectorAll('input#limitTotal');
