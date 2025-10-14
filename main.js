@@ -277,7 +277,9 @@
         
         // Wait until Open Orders is empty
         async function waitForTradeCompletion() {
-            const maxWait = 60000; // 60 seconds max
+            await new Promise(r => setTimeout(r, 5000)); // Wait minimum 5 seconds
+            
+            const maxWait = 5000; // Additional 5 seconds max
             const start = Date.now();
             
             while (Date.now() - start < maxWait) {
@@ -285,8 +287,17 @@
                 const orderSection = getXPathElement('/html/body/div[4]/div/div[3]/div/div[8]/div/div/div/div/div[2]/div[1]/div');
                 
                 if (orderSection && orderSection.textContent.includes('No Ongoing Orders')) {
-                    return 'completed'; // No open orders
+                    return 'completed';
                 }
+            }
+            
+            // Cancel stuck Buy order
+            const cancelBtn = getXPathElement('/html/body/div[4]/div/div[3]/div/div[8]/div/div/div/div/div[2]/div[1]/div/div[3]/div/div/div[1]/table/thead/tr/th[9]/div');
+            if (cancelBtn) {
+                humanClick(cancelBtn);
+                await new Promise(r => setTimeout(r, 200));
+                await clickCancelConfirmWithRetry();
+                return 'cancelled';
             }
             
             return 'timeout';
@@ -355,7 +366,15 @@
                     statusEl.textContent = `Trade ${i + 1}/${tradesCount}: Waiting...`;
                     const result = await waitForTradeCompletion();
                     statusEl.textContent = `Trade ${i + 1}/${tradesCount}: ${result}`;
-                    await new Promise(r => setTimeout(r, 500));
+                    
+                    // Random delay after successful trade (3-10 seconds)
+                    if (result === 'completed') {
+                        const delay = 3000 + Math.random() * 7000;
+                        statusEl.textContent = `Trade ${i + 1}/${tradesCount}: Waiting ${(delay/1000).toFixed(1)}s...`;
+                        await new Promise(r => setTimeout(r, delay));
+                    } else {
+                        await new Promise(r => setTimeout(r, 500));
+                    }
                 }
             }
             
