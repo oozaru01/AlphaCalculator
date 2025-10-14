@@ -1224,7 +1224,6 @@
                 const changeEmoji = percentageChange >= 0 ? '📈' : '📉';
                 const detailedReport = document.getElementById('detailed-report').checked;
                 
-                const tokenName = getTokenName();
                 let message = `<b>[${nickname}]</b> - ${new Date().toLocaleString()}\n\n` +
                     `🤖 <b>Trading Session Completed</b>\n` +
                     `🪙 Token: ${tokenName}\n\n` +
@@ -1325,7 +1324,6 @@
                     const changeEmoji = percentageChange >= 0 ? '📈' : '📉';
                     const detailedReport = document.getElementById('detailed-report').checked;
                     
-                    const tokenName = getTokenName();
                     let message = `<b>[${nickname}]</b> - ${new Date().toLocaleString()}\n\n` +
                         `⛔ <b>Trading Session STOPPED</b>\n` +
                         `🪙 Token: ${tokenName}\n\n` +
