@@ -36,16 +36,16 @@
         let startX, startY, startLeft, startTop;
         
         div.addEventListener('mouseenter', () => {
-            autoHoverEnabled = false; // Stop auto-hover when mouse is on overlay
+            window.autoHoverEnabled = false; // Stop auto-hover when mouse is on overlay
         });
         
         div.addEventListener('mouseleave', () => {
-            autoHoverEnabled = true; // Resume auto-hover when mouse leaves overlay
+            window.autoHoverEnabled = true; // Resume auto-hover when mouse leaves overlay
         });
         
         div.addEventListener('mousedown', (e) => {
             isDragging = true;
-            autoHoverEnabled = false;
+            window.autoHoverEnabled = false;
             startX = e.clientX;
             startY = e.clientY;
             startLeft = parseInt(div.style.left);
@@ -64,7 +64,7 @@
         document.addEventListener('mouseup', () => {
             isDragging = false;
             setTimeout(() => {
-                autoHoverEnabled = true; // Resume auto-hover after drag
+                window.autoHoverEnabled = true; // Resume auto-hover after drag
             }, 500);
         });
         
@@ -247,7 +247,7 @@
         }
         
         // Control auto-hover to avoid interfering with user interactions
-        let autoHoverEnabled = true;
+        window.autoHoverEnabled = true;
         let hoverInterval = setInterval(() => {
             triggerChartHover();
         }, 100); // Always trigger, removed autoHoverEnabled check
@@ -425,14 +425,6 @@
             }
         }
         
-        function attachEventListeners() {
-            document.getElementById('toggle-minimize')?.addEventListener('click', (e) => {
-                e.stopPropagation();
-                isMinimized = true;
-                localStorage.setItem('overlayMinimized', 'true');
-                updateMinimizeState();
-            });
-        
         // Helper to simulate human-like mouse movement
         function simulateMouseMove(element) {
             const rect = element.getBoundingClientRect();
@@ -474,7 +466,6 @@
         
         // Ensure sell price field is visible
         function ensureSellPriceFieldVisible() {
-            // Look for the hidden sell price field
             const hiddenSellField = document.querySelector('div[style*="display: none"] input[placeholder="Limit Sell"]');
             const isHidden = !!hiddenSellField;
             
@@ -492,7 +483,6 @@
         
         // Ensure Reverse Order checkbox is checked
         function ensureCheckboxChecked() {
-            // Find checkbox by looking for the exact structure
             const checkboxes = document.querySelectorAll('div[role="checkbox"]');
             let reverseOrderCheckbox = null;
             
@@ -518,6 +508,14 @@
                 if (document.getElementById('console-log-enabled')?.checked) console.log('Reverse Order checkbox not found');
             }
         }
+        
+        function attachEventListeners() {
+            document.getElementById('toggle-minimize')?.addEventListener('click', (e) => {
+                e.stopPropagation();
+                isMinimized = true;
+                localStorage.setItem('overlayMinimized', 'true');
+                updateMinimizeState();
+            });
         
             // Fill buy button
             document.getElementById('fill-buy').addEventListener('click', (e) => {
@@ -597,7 +595,7 @@
             }
             const consoleLogEnabled = document.getElementById('console-log-enabled')?.checked;
             if (consoleLogEnabled) {
-                console.log(message);
+                console.log(`[YellowDoge]: ${message}`);
             }
         }
         
@@ -1172,8 +1170,10 @@
                 const sellPriceInput = limitTotalInputs[1]; // Second limitTotal is sell price
                 const buyButton = getXPathElement('/html/body/div[4]/div/div[3]/div/div[9]/div/div/div/div/div[3]/button');
                 
+                log(`Elements - buyPrice:${!!buyPriceInput} inputs:${limitTotalInputs.length} button:${!!buyButton}`);
+                
                 if (buyPriceInput && limitTotalInputs.length >= 2 && buyButton) {
-                    
+                    log('Filling order form...');
                     buyPriceInput.focus();
                     await new Promise(r => setTimeout(r, 100));
                     setReactValue(buyPriceInput, prices.buy);
@@ -1210,11 +1210,14 @@
                         continue; // Skip this trade
                     }
                     
+                    log('Submitting order...');
                     simulateMouseMove(buyButton);
                     await new Promise(r => setTimeout(r, randomDelay(30, 50)));
                     humanClick(buyButton);
                     await new Promise(r => setTimeout(r, randomDelay(150, 200)));
+                    log('Confirming...');
                     await clickConfirmWithRetry();
+                    log('Order placed');
                     
                     // Wait 2 seconds after confirmation for order processing
                     await new Promise(r => setTimeout(r, 2000));
@@ -1249,7 +1252,6 @@
                     // Only calculate loss and save if trade completed successfully
                     if (result === 'completed') {
                         completedTradesCount++;
-                        if (isMinimized) updateMinimizeState();
                         // Calculate actual loss from balance delta
                         await new Promise(r => setTimeout(r, 1000)); // Wait for balance update
                         const balanceAfterTrade = window.currentBalance;
@@ -1294,6 +1296,10 @@
                         log('Waiting 2s before retry...');
                         await new Promise(r => setTimeout(r, 2000));
                     }
+                } else {
+                    log('❌ Missing form elements, skipping trade');
+                    await new Promise(r => setTimeout(r, 2000));
+                    continue;
                 }
             }
             
@@ -1413,7 +1419,7 @@
                     const tradeAmount = parseFloat(document.getElementById('trade-amount').value) || 1;
                     
                     // Get token holdings value
-                    tokenName = getTokenName();
+                    let tokenName = getTokenName();
                     const holdingsTab = document.querySelector('#bn-tab-holdings');
                     if (holdingsTab) holdingsTab.click();
                     await new Promise(r => setTimeout(r, 500));
@@ -1737,17 +1743,17 @@
                 console.log('Slider container not found!');
             }
             
-            // Get aggressive sell price for instant fill
+            // Set sell price using spread
             const { currentPrice } = getMarketData();
             if (currentPrice) {
-                // Extra aggressive sell price - 0.5% below market for guaranteed instant fill
-                const aggressiveSellPrice = (currentPrice * 0.995).toFixed(8);
+                const halfSpread = buySpreadPercent / 2 / 100;
+                const sellPrice = (currentPrice * (1 - halfSpread)).toFixed(8);
                 const sellPriceInput = document.getElementById('limitPrice');
                 if (sellPriceInput) {
-                    console.log('Setting aggressive sell price for instant fill:', aggressiveSellPrice);
+                    console.log('Setting cleanup sell price:', sellPrice);
                     sellPriceInput.focus();
                     await new Promise(r => setTimeout(r, 100));
-                    setReactValue(sellPriceInput, aggressiveSellPrice);
+                    setReactValue(sellPriceInput, sellPrice);
                     await new Promise(r => setTimeout(r, 200));
                 }
             }
