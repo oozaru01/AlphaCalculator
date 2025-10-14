@@ -157,11 +157,18 @@
                 <button id="auto-buy" style="padding:4px 8px; cursor:pointer; background:#2E7D32; border:none; border-radius:4px; color:white; font-size:12px;">Buy</button>
             </div>
             <div style="margin-bottom:4px;">Sell: <span id="sell-price">-</span></div>
-            <div style="margin-bottom:4px;">Loss: <span id="loss-percent">-</span></div>
+            <div style="margin-bottom:4px;">Loss: <span id="loss-percent">-</span> | Spread: <span id="spread-info">-</span></div>
             <div style="margin-bottom:4px;">Est. Loss: <span id="loss-usdt">-</span> USDT</div>
+            <div style="margin-bottom:4px; padding-top:4px; border-top:1px solid #444;">
+                Max Loss: <input id="max-loss" type="number" value="10" step="0.1" style="width:50px; padding:2px 4px; background:#333; color:white; border:1px solid #555; border-radius:3px;" /> USDT
+            </div>
+            <div style="margin-bottom:4px;">
+                Max/Hr: <input id="max-trades-hour" type="number" value="30" min="1" style="width:50px; padding:2px 4px; background:#333; color:white; border:1px solid #555; border-radius:3px;" /> trades
+            </div>
             <div style="display:flex; align-items:center; gap:4px; margin-top:8px; padding-top:8px; border-top:1px solid #555;">
                 <div style="flex:1;">Trades: <input id="bulk-trades" type="number" value="10" min="1" style="width:50px; padding:2px 4px; background:#333; color:white; border:1px solid #555; border-radius:3px;" /></div>
                 <button id="bulk-start" style="padding:4px 12px; cursor:pointer; background:#FF9800; border:none; border-radius:4px; color:white; font-size:12px; font-weight:bold;">Start</button>
+                <button id="bulk-pause" style="padding:4px 12px; cursor:pointer; background:#F44336; border:none; border-radius:4px; color:white; font-size:12px; font-weight:bold; display:none;">Pause</button>
             </div>
             <div id="bulk-total-loss" style="margin-top:4px; font-size:12px; color:#FF6B6B;"></div>
             <div id="bulk-status" style="margin-top:4px; font-size:12px; color:#FFD700;"></div>
@@ -208,13 +215,16 @@
             return min + Math.random() * (max - min);
         }
         
-        // Ensure checkbox is checked
+        // Ensure Reverse Order checkbox is checked
         function ensureCheckboxChecked() {
-            const checkbox = getXPathElement('/html/body/div[4]/div/div[3]/div/div[9]/div/div/div/div/div[3]/div[5]/div[1]/div[1]/div/svg');
-            if (checkbox) {
-                const isChecked = checkbox.closest('div').querySelector('input[type="checkbox"]')?.checked;
-                if (!isChecked) {
-                    humanClick(checkbox);
+            const checkboxContainer = getXPathElement('/html/body/div[4]/div/div[3]/div/div[9]/div/div/div/div/div[3]/div[5]/div[1]/div[1]/div');
+            if (checkboxContainer) {
+                const checkbox = checkboxContainer.querySelector('input[type="checkbox"]');
+                if (checkbox && !checkbox.checked) {
+                    const svg = checkboxContainer.querySelector('svg');
+                    if (svg) {
+                        humanClick(svg);
+                    }
                 }
             }
         }
@@ -229,11 +239,12 @@
             const amount = document.getElementById('trade-amount').value || '1';
             
             const buyPriceInput = document.getElementById('limitPrice');
-            const limitTotalInputs = document.querySelectorAll('#limitTotal');
-            const amountInput = limitTotalInputs[0];
-            const sellPriceInput = limitTotalInputs[1];
+            const limitTotalInputs = document.querySelectorAll('input#limitTotal');
+            const amountInput = limitTotalInputs[0]; // First limitTotal is USDT amount
+            const sellPriceInput = limitTotalInputs[1]; // Second limitTotal is sell price
             
-            if (buyPriceInput && amountInput && sellPriceInput) {
+            if (buyPriceInput && limitTotalInputs.length >= 2) {
+                
                 buyPriceInput.focus();
                 setTimeout(() => {
                     setReactValue(buyPriceInput, buyPrice);
@@ -245,6 +256,12 @@
                                 sellPriceInput.focus();
                                 setTimeout(() => {
                                     setReactValue(sellPriceInput, sellPrice);
+                                    // Verify sell price was set
+                                    setTimeout(() => {
+                                        if (sellPriceInput.value !== sellPrice) {
+                                            setReactValue(sellPriceInput, sellPrice);
+                                        }
+                                    }, 50);
                                 }, 100);
                             }, 200);
                         }, 100);
@@ -255,119 +272,203 @@
             }
         });
         
-        // Prevent amount input from triggering drag
-        document.getElementById('trade-amount').addEventListener('mousedown', (e) => {
-            e.stopPropagation();
+        // Prevent inputs from triggering drag
+        ['trade-amount', 'bulk-trades', 'bulk-pause', 'max-loss', 'max-trades-hour'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('mousedown', (e) => e.stopPropagation());
         });
         
-        document.getElementById('bulk-trades').addEventListener('mousedown', (e) => {
-            e.stopPropagation();
-        });
-        
-        // Get trading fee from Binance UI
-        function getTradingFee() {
+        // Get trading fee in tokens and convert to USDT
+        function getTradingFeeUSDT(marketPrice) {
             const feeEl = getXPathElement('/html/body/div[4]/div/div[3]/div/div[9]/div/div/div/div/div[3]/div[6]/div[2]/div[2]');
-            if (feeEl) {
-                const feeText = feeEl.textContent.trim().replace(/[^0-9.]/g, '');
-                const fee = parseFloat(feeText);
-                return !isNaN(fee) ? fee : 0;
+            if (feeEl && marketPrice) {
+                const feeTokens = parseFloat(feeEl.textContent.trim());
+                if (!isNaN(feeTokens)) {
+                    return feeTokens * marketPrice;
+                }
             }
             return 0;
         }
         
-        // Wait until Open Orders is empty
+        // Wait until Open Orders is completely empty (both Buy and Sell completed)
         async function waitForTradeCompletion() {
-            await new Promise(r => setTimeout(r, 5000)); // Wait minimum 5 seconds
+            console.log('Waiting for trade completion...');
+            await new Promise(r => setTimeout(r, 2000)); // Wait minimum 2 seconds
             
-            const maxWait = 5000; // Additional 5 seconds max
-            const start = Date.now();
-            
-            while (Date.now() - start < maxWait) {
-                await new Promise(r => setTimeout(r, 500));
+            // Wait indefinitely until no orders remain
+            let checkCount = 0;
+            while (true) {
+                await new Promise(r => setTimeout(r, 1000)); // Check every 1 second
+                checkCount++;
+                
                 const orderSection = getXPathElement('/html/body/div[4]/div/div[3]/div/div[8]/div/div/div/div/div[2]/div[1]/div');
                 
-                if (orderSection && orderSection.textContent.includes('No Ongoing Orders')) {
+                if (!orderSection) {
+                    console.log('Order section not found');
+                    continue;
+                }
+                
+                const orderText = orderSection.textContent;
+                console.log(`Check ${checkCount}: Order section text:`, orderText);
+                
+                // Success: No orders at all
+                if (orderText.includes('No Ongoing Orders')) {
+                    console.log('Trade completed - No Ongoing Orders');
                     return 'completed';
                 }
-            }
-            
-            // Check if stuck order is Buy or Sell
-            const orderSection = getXPathElement('/html/body/div[4]/div/div[3]/div/div[8]/div/div/div/div/div[2]/div[1]/div');
-            if (orderSection && orderSection.textContent.includes('Sell')) {
-                // Sell order - keep waiting indefinitely
-                while (true) {
-                    await new Promise(r => setTimeout(r, 1000));
-                    const section = getXPathElement('/html/body/div[4]/div/div[3]/div/div[8]/div/div/div/div/div[2]/div[1]/div');
-                    if (section && section.textContent.includes('No Ongoing Orders')) {
-                        return 'completed';
+                
+                // Cancel stuck Buy order after 10 seconds
+                if (checkCount >= 10 && orderText.includes('Buy')) {
+                    console.log('Buy order stuck for 10s, canceling...');
+                    const cancelBtn = getXPathElement('/html/body/div[4]/div/div[3]/div/div[8]/div/div/div/div/div[2]/div[1]/div/div[3]/div/div/div[1]/table/thead/tr/th[9]/div');
+                    if (cancelBtn) {
+                        humanClick(cancelBtn);
+                        await new Promise(r => setTimeout(r, 200));
+                        await clickCancelConfirmWithRetry();
+                        return 'cancelled';
                     }
                 }
+                
+                // Continue waiting if Sell order exists (normal flow)
+                if (orderText.includes('Sell')) {
+                    console.log('Sell order active, waiting...');
+                    continue;
+                }
             }
-            
-            // Cancel stuck Buy order only
-            const cancelBtn = getXPathElement('/html/body/div[4]/div/div[3]/div/div[8]/div/div/div/div/div[2]/div[1]/div/div[3]/div/div/div[1]/table/thead/tr/th[9]/div');
-            if (cancelBtn) {
-                humanClick(cancelBtn);
-                await new Promise(r => setTimeout(r, 200));
-                await clickCancelConfirmWithRetry();
-                return 'cancelled';
-            }
-            
-            return 'timeout';
+        }
+        
+        // Cookie storage functions
+        function saveTradeToStorage(tradeData) {
+            const trades = JSON.parse(localStorage.getItem('binanceTrades') || '[]');
+            trades.push(tradeData);
+            localStorage.setItem('binanceTrades', JSON.stringify(trades));
+        }
+        
+        function getTotalLossFromStorage() {
+            const trades = JSON.parse(localStorage.getItem('binanceTrades') || '[]');
+            return trades.reduce((sum, t) => sum + parseFloat(t.lossUSDT || 0), 0);
+        }
+        
+        function getTradesInLastHour() {
+            const trades = JSON.parse(localStorage.getItem('binanceTrades') || '[]');
+            const oneHourAgo = new Date(Date.now() - 3600000).toISOString();
+            return trades.filter(t => t.timestamp > oneHourAgo).length;
+        }
+        
+        // Safety checks
+        function checkMaxLoss() {
+            const maxLoss = parseFloat(document.getElementById('max-loss').value) || 10;
+            const totalLoss = getTotalLossFromStorage();
+            return totalLoss < maxLoss;
+        }
+        
+        function checkRateLimit() {
+            const maxPerHour = parseInt(document.getElementById('max-trades-hour').value) || 30;
+            const tradesLastHour = getTradesInLastHour();
+            return tradesLastHour < maxPerHour;
+        }
+        
+        function checkBalance(amount) {
+            return window.currentBalance >= amount;
         }
         
         // Bulk trade execution
         let isExecuting = false;
+        let isPaused = false;
         async function executeBulkTrades() {
             if (isExecuting) return;
             isExecuting = true;
+            isPaused = false;
             
             const tradesCount = parseInt(document.getElementById('bulk-trades').value) || 10;
-            const amount = parseFloat(document.getElementById('trade-amount').value) || 1;
-            const lossPercent = parseFloat(document.getElementById('loss-percent').textContent) || 0;
-            const fee = getTradingFee();
-            
-            // Calculate total loss: (loss per trade + fee) * number of trades
-            const lossPerTrade = (amount * lossPercent / 100) + fee;
-            const totalLoss = (lossPerTrade * tradesCount).toFixed(6);
-            
             const statusEl = document.getElementById('bulk-status');
             const totalLossEl = document.getElementById('bulk-total-loss');
             const startBtn = document.getElementById('bulk-start');
+            const pauseBtn = document.getElementById('bulk-pause');
             
-            totalLossEl.textContent = `Est. Total Loss: ${totalLoss} USDT (${tradesCount} trades)`;
-            startBtn.disabled = true;
-            startBtn.textContent = 'Running...';
+            startBtn.style.display = 'none';
+            pauseBtn.style.display = 'inline-block';
             
             for (let i = 0; i < tradesCount; i++) {
                 if (!isExecuting) break;
                 
-                statusEl.textContent = `Trade ${i + 1}/${tradesCount}: Executing...`;
+                // Check pause
+                while (isPaused && isExecuting) {
+                    statusEl.textContent = `Paused at trade ${i + 1}/${tradesCount}`;
+                    await new Promise(r => setTimeout(r, 500));
+                }
+                if (!isExecuting) break;
+                
+                // Safety checks
+                if (!checkMaxLoss()) {
+                    statusEl.textContent = 'STOPPED: Max loss limit reached!';
+                    statusEl.style.color = '#FF0000';
+                    break;
+                }
+                
+                if (!checkRateLimit()) {
+                    statusEl.textContent = 'STOPPED: Rate limit reached (wait 1 hour)';
+                    statusEl.style.color = '#FF0000';
+                    break;
+                }
+                
+                statusEl.textContent = `Trade ${i + 1}/${tradesCount}: Calculating...`;
+                statusEl.style.color = '#FFD700';
+                
+                // Fresh price calculation
+                const prices = calculateOptimalPrices();
+                if (!prices) {
+                    statusEl.textContent = `Trade ${i + 1}/${tradesCount}: Price error`;
+                    await new Promise(r => setTimeout(r, 2000));
+                    continue;
+                }
+                
+                const amount = parseFloat(document.getElementById('trade-amount').value) || 1;
+                
+                // Balance check
+                if (!checkBalance(amount)) {
+                    statusEl.textContent = `STOPPED: Insufficient balance (need ${amount} USDT)`;
+                    statusEl.style.color = '#FF0000';
+                    break;
+                }
+                
+                const feeUSDT = getTradingFeeUSDT(parseFloat(prices.market));
+                const lossUSDT = (amount * parseFloat(prices.loss) / 100 + feeUSDT).toFixed(6);
+                const totalLossSoFar = getTotalLossFromStorage();
+                
+                totalLossEl.textContent = `Total Loss: ${totalLossSoFar.toFixed(6)} USDT | This: ${lossUSDT} USDT`;
                 
                 ensureCheckboxChecked();
+                await new Promise(r => setTimeout(r, 100)); // Wait for checkbox
                 
-                const buyPrice = document.getElementById('buy-price').textContent;
-                const sellPrice = document.getElementById('sell-price').textContent;
-                const amount = document.getElementById('trade-amount').value || '1';
                 const buyPriceInput = document.getElementById('limitPrice');
-                const limitTotalInputs = document.querySelectorAll('#limitTotal');
-                const amountInput = limitTotalInputs[0];
-                const sellPriceInput = limitTotalInputs[1];
+                const limitTotalInputs = document.querySelectorAll('input#limitTotal');
+                const amountInput = limitTotalInputs[0]; // First limitTotal is USDT amount
+                const sellPriceInput = limitTotalInputs[1]; // Second limitTotal is sell price
                 const buyButton = getXPathElement('/html/body/div[4]/div/div[3]/div/div[9]/div/div/div/div/div[3]/button');
                 
-                if (buyPriceInput && amountInput && sellPriceInput && buyButton) {
+                if (buyPriceInput && limitTotalInputs.length >= 2 && buyButton) {
+                    
                     buyPriceInput.focus();
                     await new Promise(r => setTimeout(r, 100));
-                    setReactValue(buyPriceInput, buyPrice);
+                    setReactValue(buyPriceInput, prices.buy);
                     await new Promise(r => setTimeout(r, 200));
+                    
                     amountInput.focus();
                     await new Promise(r => setTimeout(r, 100));
-                    setReactValue(amountInput, amount);
+                    setReactValue(amountInput, amount.toString());
                     await new Promise(r => setTimeout(r, 200));
+                    
                     sellPriceInput.focus();
                     await new Promise(r => setTimeout(r, 100));
-                    setReactValue(sellPriceInput, sellPrice);
-                    await new Promise(r => setTimeout(r, 200));
+                    setReactValue(sellPriceInput, prices.sell);
+                    await new Promise(r => setTimeout(r, 100));
+                    
+                    // Verify sell price was set correctly
+                    if (sellPriceInput.value !== prices.sell) {
+                        setReactValue(sellPriceInput, prices.sell);
+                        await new Promise(r => setTimeout(r, 100));
+                    }
                     
                     simulateMouseMove(buyButton);
                     await new Promise(r => setTimeout(r, randomDelay(30, 50)));
@@ -378,11 +479,37 @@
                     // Wait for trade completion
                     statusEl.textContent = `Trade ${i + 1}/${tradesCount}: Waiting...`;
                     const result = await waitForTradeCompletion();
-                    statusEl.textContent = `Trade ${i + 1}/${tradesCount}: ${result}`;
                     
-                    // Random delay after successful trade (3-10 seconds)
+                    // Get actual fill prices for slippage check
+                    const actualBuyPrice = parseFloat(prices.buy);
+                    const expectedBuyPrice = parseFloat(prices.buy);
+                    const slippage = Math.abs((actualBuyPrice - expectedBuyPrice) / expectedBuyPrice * 100);
+                    
+                    if (slippage > 0.1) {
+                        statusEl.textContent = `Trade ${i + 1}: SLIPPAGE WARNING ${slippage.toFixed(3)}%`;
+                        statusEl.style.color = '#FFA500';
+                    } else {
+                        statusEl.textContent = `Trade ${i + 1}/${tradesCount}: ${result}`;
+                    }
+                    
+                    // Save trade data
+                    const tradeData = {
+                        timestamp: new Date().toISOString(),
+                        tradeNumber: i + 1,
+                        buyPrice: prices.buy,
+                        sellPrice: prices.sell,
+                        amount: amount,
+                        lossPercent: prices.loss,
+                        feeUSDT: feeUSDT.toFixed(6),
+                        lossUSDT: lossUSDT,
+                        result: result,
+                        slippage: slippage.toFixed(3)
+                    };
+                    saveTradeToStorage(tradeData);
+                    
+                    // Random delay after successful trade (2-4 seconds)
                     if (result === 'completed') {
-                        const delay = 3000 + Math.random() * 7000;
+                        const delay = 2000 + Math.random() * 2000;
                         statusEl.textContent = `Trade ${i + 1}/${tradesCount}: Waiting ${(delay/1000).toFixed(1)}s...`;
                         await new Promise(r => setTimeout(r, delay));
                     } else {
@@ -391,16 +518,37 @@
                 }
             }
             
-            statusEl.textContent = `Completed ${tradesCount} trades!`;
-            startBtn.disabled = false;
-            startBtn.textContent = 'Start';
+            const finalLoss = getTotalLossFromStorage();
+            statusEl.textContent = `Completed! Total Loss: ${finalLoss.toFixed(6)} USDT`;
+            statusEl.style.color = '#4CAF50';
+            startBtn.style.display = 'inline-block';
+            pauseBtn.style.display = 'none';
             isExecuting = false;
-            setTimeout(() => statusEl.textContent = '', 3000);
+            isPaused = false;
+            setTimeout(() => {
+                statusEl.textContent = '';
+                statusEl.style.color = '#FFD700';
+            }, 5000);
         }
         
         document.getElementById('bulk-start').addEventListener('click', (e) => {
             e.stopPropagation();
             executeBulkTrades();
+        });
+        
+        document.getElementById('bulk-pause').addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (isExecuting) {
+                if (isPaused) {
+                    isPaused = false;
+                    e.target.textContent = 'Pause';
+                    e.target.style.background = '#F44336';
+                } else {
+                    isPaused = true;
+                    e.target.textContent = 'Resume';
+                    e.target.style.background = '#4CAF50';
+                }
+            }
         });
         
         // Safer confirm button click with retry
@@ -466,12 +614,13 @@
             const sellPrice = document.getElementById('sell-price').textContent;
             const amount = document.getElementById('trade-amount').value || '1';
             const buyPriceInput = document.getElementById('limitPrice');
-            const limitTotalInputs = document.querySelectorAll('#limitTotal');
-            const amountInput = limitTotalInputs[0];
-            const sellPriceInput = limitTotalInputs[1];
+            const limitTotalInputs = document.querySelectorAll('input#limitTotal');
+            const amountInput = limitTotalInputs[0]; // First limitTotal is USDT amount
+            const sellPriceInput = limitTotalInputs[1]; // Second limitTotal is sell price
             const buyButton = getXPathElement('/html/body/div[4]/div/div[3]/div/div[9]/div/div/div/div/div[3]/button');
             
-            if (buyPriceInput && amountInput && sellPriceInput && buyButton) {
+            if (buyPriceInput && limitTotalInputs.length >= 2 && buyButton) {
+                
                 buyPriceInput.focus();
                 setTimeout(() => {
                     setReactValue(buyPriceInput, buyPrice);
@@ -484,15 +633,21 @@
                                 setTimeout(() => {
                                     setReactValue(sellPriceInput, sellPrice);
                                     setTimeout(() => {
-                                        simulateMouseMove(buyButton);
+                                        // Verify sell price
+                                        if (sellPriceInput.value !== sellPrice) {
+                                            setReactValue(sellPriceInput, sellPrice);
+                                        }
                                         setTimeout(() => {
-                                            humanClick(buyButton);
-                                            setTimeout(async () => {
-                                                await clickConfirmWithRetry();
-                                                monitorOrder();
-                                            }, randomDelay(150, 200));
-                                        }, randomDelay(30, 50));
-                                    }, randomDelay(50, 80));
+                                            simulateMouseMove(buyButton);
+                                            setTimeout(() => {
+                                                humanClick(buyButton);
+                                                setTimeout(async () => {
+                                                    await clickConfirmWithRetry();
+                                                    monitorOrder();
+                                                }, randomDelay(150, 200));
+                                            }, randomDelay(30, 50));
+                                        }, randomDelay(50, 80));
+                                    }, 50);
                                 }, 100);
                             }, 200);
                         }, 100);
@@ -508,8 +663,8 @@
             let currentPrice = null;
             const trades = [];
             
-            // Method 1: Try chart close price (most accurate live price)
-            const chartCloseEl = document.querySelector('.chart-title-indicator-container .default-label-box[key="c"]');
+            // Method 1: Chart close price (fastest, 50ms acceptable)
+            const chartCloseEl = document.querySelector('.default-label-box[key="c"]');
             if (chartCloseEl) {
                 const price = parseFloat(chartCloseEl.textContent);
                 if (!isNaN(price) && price > 0) {
@@ -592,52 +747,62 @@
             const { currentPrice, trades } = getMarketData();
             if (!currentPrice) return null;
             
-            // Analyze recent trades to find best buy/sell prices
-            const recentTrades = trades.slice(0, 20);
             const buyTrades = [];
             const sellTrades = [];
             
-            // Get trade book to identify buy/sell orders
+            // Get recent trades with volume and time weighting
             const tradeBookEl = getXPathElement('/html/body/div[4]/div/div[3]/div/div[7]/div/div/div');
             if (tradeBookEl) {
                 const rows = tradeBookEl.querySelectorAll('[role="gridcell"]');
-                rows.forEach(row => {
-                    const priceEl = row.querySelector('[style*="--color-Buy"]');
-                    const sellPriceEl = row.querySelector('[style*="--color-Sell"]');
-                    
-                    if (priceEl) {
-                        const p = parseFloat(priceEl.textContent);
-                        if (!isNaN(p) && p > 0) buyTrades.push(p);
-                    }
-                    if (sellPriceEl) {
-                        const p = parseFloat(sellPriceEl.textContent);
-                        if (!isNaN(p) && p > 0) sellTrades.push(p);
+                rows.forEach((row, index) => {
+                    const priceEl = row.querySelector('.cursor-pointer');
+                    const amountEl = row.querySelector('.text-right');
+                    if (priceEl && amountEl) {
+                        const price = parseFloat(priceEl.textContent);
+                        const amountText = amountEl.textContent.trim();
+                        const amount = parseFloat(amountText.replace('K', '')) * (amountText.includes('K') ? 1000 : 1) * (amountText.includes('M') ? 1000000 : 1);
+                        const timeDecay = Math.pow(0.95, index);
+                        
+                        if (!isNaN(price) && !isNaN(amount) && price > 0) {
+                            const weight = amount * timeDecay;
+                            const isBuy = priceEl.style.color.includes('Buy');
+                            const isSell = priceEl.style.color.includes('Sell');
+                            
+                            if (isBuy) buyTrades.push({ price, weight });
+                            if (isSell) sellTrades.push({ price, weight });
+                        }
                     }
                 });
             }
             
-            // Calculate optimal prices based on order book
-            let buyPrice, sellPrice;
+            let buyPrice, sellPrice, spread;
             
             if (buyTrades.length > 0 && sellTrades.length > 0) {
-                const sortedBuy = buyTrades.sort((a,b) => a-b);
-                const sortedSell = sellTrades.sort((a,b) => a-b);
-                const medianBuy = sortedBuy[Math.floor(sortedBuy.length/2)];
-                const medianSell = sortedSell[Math.floor(sortedSell.length/2)];
+                // Sort by weight (volume * time decay)
+                buyTrades.sort((a, b) => b.weight - a.weight);
+                sellTrades.sort((a, b) => b.weight - a.weight);
                 
-                // Buy at least 0.01% above current to fill instantly
-                buyPrice = Math.max(medianBuy, currentPrice * 1.0001);
+                // Take top 30% most significant trades
+                const topBuyPrices = buyTrades.slice(0, Math.ceil(buyTrades.length * 0.3)).map(t => t.price);
+                const topSellPrices = sellTrades.slice(0, Math.ceil(sellTrades.length * 0.3)).map(t => t.price);
                 
-                // Sell at highest possible price from order book that's still below buy
-                const viableSells = sortedSell.filter(p => p < buyPrice && p >= currentPrice * 0.999);
-                if (viableSells.length > 0) {
-                    sellPrice = viableSells[viableSells.length - 1]; // Highest viable sell
-                } else {
-                    sellPrice = Math.min(medianSell, buyPrice * 0.9995); // 0.05% below buy
+                // Buy at lowest significant sell price
+                buyPrice = Math.min(...topSellPrices);
+                
+                // Sell at highest significant buy price
+                sellPrice = Math.max(...topBuyPrices);
+                
+                spread = ((sellPrice - buyPrice) / buyPrice * 100).toFixed(4);
+                
+                // Safety: ensure sell > buy
+                if (sellPrice <= buyPrice) {
+                    buyPrice = currentPrice * 1.00005;
+                    sellPrice = currentPrice * 0.99995;
                 }
             } else {
-                buyPrice = currentPrice * 1.0001;
-                sellPrice = currentPrice * 0.9999;
+                buyPrice = currentPrice * 1.00005;
+                sellPrice = currentPrice * 0.99995;
+                spread = '0.01';
             }
             
             const lossPercent = ((buyPrice - sellPrice) / buyPrice * 100).toFixed(3);
@@ -646,7 +811,8 @@
                 market: currentPrice.toFixed(8),
                 buy: buyPrice.toFixed(8),
                 sell: sellPrice.toFixed(8),
-                loss: lossPercent
+                loss: lossPercent,
+                spread: spread
             };
         }
 
@@ -678,17 +844,20 @@
                     const sellEl = document.getElementById('sell-price');
                     const lossPercentEl = document.getElementById('loss-percent');
                     const lossUsdtEl = document.getElementById('loss-usdt');
+                    const spreadEl = document.getElementById('spread-info');
                     
                     if (marketEl) marketEl.textContent = prices.market;
                     if (buyEl) buyEl.textContent = prices.buy;
                     if (sellEl) sellEl.textContent = prices.sell;
                     if (lossPercentEl) lossPercentEl.textContent = prices.loss + '%';
+                    if (spreadEl) spreadEl.textContent = prices.spread + '%';
                     
-                    // Calculate estimated loss in USDT
+                    // Calculate estimated loss in USDT (including fee)
                     const amountInput = document.getElementById('trade-amount');
                     if (amountInput && lossUsdtEl) {
                         const amount = parseFloat(amountInput.value) || 1;
-                        const lossUSDT = (amount * parseFloat(prices.loss) / 100).toFixed(6);
+                        const feeUSDT = getTradingFeeUSDT(parseFloat(prices.market));
+                        const lossUSDT = (amount * parseFloat(prices.loss) / 100 + feeUSDT).toFixed(6);
                         lossUsdtEl.textContent = lossUSDT;
                     }
                 } else {
