@@ -1,7 +1,8 @@
 // ==UserScript==
 // @name         Binance Trading Calculator v2
 // @match        *://*.binance.com/*
-// @grant        none
+// @grant        GM_xmlhttpRequest
+// @connect      api.telegram.org
 // ==/UserScript==
 
 (function() {
@@ -100,6 +101,7 @@
         
         let currentCount = 0;
         let balanceBeforeTrade = 0;
+        let sessionVolume = 0;
         
         // Telegram configuration
         const TELEGRAM_BOT_TOKEN = '8394008255:AAH7r1AHxSYx8iFFP32mfUOvOWg3o_NocxA';
@@ -444,7 +446,6 @@
         // Add button handlers
         document.getElementById('fill-buy').addEventListener('click', (e) => {
             e.stopPropagation();
-            ensureCheckboxChecked();
             
             const buyPrice = document.getElementById('buy-price').textContent;
             const sellPrice = document.getElementById('sell-price').textContent;
@@ -534,31 +535,45 @@
             console.log('Chat ID:', TELEGRAM_CHAT_ID);
             console.log('Message:', message);
             
-            try {
+            return new Promise((resolve, reject) => {
                 const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-                const response = await fetch(url, {
+                
+                GM_xmlhttpRequest({
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
+                    url: url,
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    data: JSON.stringify({
                         chat_id: TELEGRAM_CHAT_ID,
                         text: message,
                         parse_mode: 'HTML'
-                    })
+                    }),
+                    onload: function(response) {
+                        try {
+                            const result = JSON.parse(response.responseText);
+                            console.log('Telegram API response:', result);
+                            
+                            if (!result.ok) {
+                                console.error('Telegram API error:', result.description);
+                                alert(`Telegram error: ${result.description}`);
+                                reject(new Error(result.description));
+                            } else {
+                                console.log('Message sent successfully!');
+                                resolve(result);
+                            }
+                        } catch (e) {
+                            console.error('Parse error:', e);
+                            reject(e);
+                        }
+                    },
+                    onerror: function(error) {
+                        console.error('Telegram send error:', error);
+                        alert(`Failed to send Telegram message: Network error`);
+                        reject(error);
+                    }
                 });
-                
-                const result = await response.json();
-                console.log('Telegram API response:', result);
-                
-                if (!result.ok) {
-                    console.error('Telegram API error:', result.description);
-                    alert(`Telegram error: ${result.description}`);
-                } else {
-                    console.log('Message sent successfully!');
-                }
-            } catch (e) {
-                console.error('Telegram send error:', e);
-                alert(`Failed to send Telegram message: ${e.message}`);
-            }
+            });
         }
         
         // Get trading fee in tokens and convert to USDT
@@ -676,6 +691,7 @@
         let isExecuting = false;
         let isPaused = false;
         let completedTradesCount = 0;
+        let balanceBeforeSession = 0;
         async function executeBulkTrades() {
             if (isExecuting) {
                 console.log('Already executing, stopping current execution');
@@ -683,10 +699,27 @@
                 await new Promise(r => setTimeout(r, 500));
             }
             
+            // Ask user to confirm Reverse Order checkbox
+            if (!confirm('Have you checked the "Reverse Order" checkbox?\n\nClick OK to proceed, Cancel to stop.')) {
+                console.log('User cancelled - Reverse Order not confirmed');
+                const statusEl = document.getElementById('bulk-status');
+                if (statusEl) {
+                    statusEl.textContent = 'Cancelled - Please check Reverse Order checkbox';
+                    statusEl.style.color = '#FF9800';
+                    setTimeout(() => {
+                        statusEl.textContent = '';
+                    }, 3000);
+                }
+                return;
+            }
+            console.log('User confirmed Reverse Order checkbox');
+            
             console.log('Starting new bulk trade execution');
             isExecuting = true;
             isPaused = false;
             completedTradesCount = 0;
+            sessionVolume = 0;
+            balanceBeforeSession = window.currentBalance;
             
             const tradesCount = parseInt(document.getElementById('bulk-trades').value) || 10;
             const statusEl = document.getElementById('bulk-status');
@@ -844,7 +877,10 @@
                         slippage: slippage.toFixed(3)
                     };
                     saveTradeToStorage(tradeData);
-                    if (result === 'completed') completedTradesCount++;
+                    if (result === 'completed') {
+                        completedTradesCount++;
+                        sessionVolume += amount;
+                    }
                     
                     // Random delay after successful trade
                     if (result === 'completed') {
@@ -872,15 +908,20 @@
                 const trades = JSON.parse(localStorage.getItem('binanceTrades') || '[]');
                 const recentTrades = trades.slice(-tradesCount);
                 const cancelledCount = recentTrades.filter(t => t.result === 'cancelled').length;
-                const totalLoss = recentTrades.reduce((sum, t) => sum + parseFloat(t.actualLoss || 0), 0);
+                const tradeAmount = parseFloat(document.getElementById('trade-amount').value) || 1;
+                const balanceAfterSession = window.currentBalance;
+                const actualSessionLoss = balanceBeforeSession - balanceAfterSession;
                 
                 const message = `<b>[${nickname}]</b> - ${new Date().toLocaleString()}\n\n` +
                     `🤖 <b>Trading Session Completed</b>\n\n` +
                     `📊 Total Trades: ${tradesCount}\n` +
                     `✅ Completed: ${completedTradesCount}\n` +
                     `❌ Cancelled: ${cancelledCount}\n` +
-                    `💰 Session Loss: ${totalLoss.toFixed(6)} USDT\n` +
-                    `📈 Cumulative Loss: ${finalLoss.toFixed(6)} USDT`;
+                    `💵 Amount per Trade: ${tradeAmount} USDT\n` +
+                    `📈 Total Volume: ${sessionVolume.toFixed(2)} USDT\n` +
+                    `💰 Total Loss: ${actualSessionLoss.toFixed(6)} USDT\n` +
+                    `📊 Balance Before: ${balanceBeforeSession.toFixed(2)} USDT\n` +
+                    `📊 Balance After: ${balanceAfterSession.toFixed(2)} USDT`;
                 
                 console.log('Sending Telegram notification...');
                 sendTelegramMessage(message);
@@ -900,6 +941,7 @@
         
         document.getElementById('bulk-start').addEventListener('click', (e) => {
             e.stopPropagation();
+            console.log('Start button clicked');
             executeBulkTrades();
         });
         
@@ -918,16 +960,37 @@
             }
         });
         
-        document.getElementById('bulk-stop').addEventListener('click', (e) => {
+        document.getElementById('bulk-stop').addEventListener('click', async (e) => {
             e.stopPropagation();
             if (isExecuting) {
-                isExecuting = false;
-                isPaused = false;
-                completedTradesCount = 0; // Reset counter
                 const statusEl = document.getElementById('bulk-status');
                 const startBtn = document.getElementById('bulk-start');
                 const pauseBtn = document.getElementById('bulk-pause');
                 const stopBtn = document.getElementById('bulk-stop');
+                
+                // Send Telegram notification before stopping
+                if (completedTradesCount > 0) {
+                    const nickname = localStorage.getItem('traderNickname') || 'Trader';
+                    const tradeAmount = parseFloat(document.getElementById('trade-amount').value) || 1;
+                    const balanceAfterSession = window.currentBalance;
+                    const actualSessionLoss = balanceBeforeSession - balanceAfterSession;
+                    
+                    const message = `<b>[${nickname}]</b> - ${new Date().toLocaleString()}\n\n` +
+                        `⛔ <b>Trading Session STOPPED</b>\n\n` +
+                        `📊 Completed Trades: ${completedTradesCount}\n` +
+                        `💵 Amount per Trade: ${tradeAmount} USDT\n` +
+                        `📈 Total Volume: ${sessionVolume.toFixed(2)} USDT\n` +
+                        `💰 Total Loss: ${actualSessionLoss.toFixed(6)} USDT\n` +
+                        `📊 Balance Before: ${balanceBeforeSession.toFixed(2)} USDT\n` +
+                        `📊 Balance After: ${balanceAfterSession.toFixed(2)} USDT`;
+                    
+                    await sendTelegramMessage(message);
+                }
+                
+                isExecuting = false;
+                isPaused = false;
+                completedTradesCount = 0;
+                sessionVolume = 0;
                 
                 statusEl.textContent = 'STOPPED by user';
                 statusEl.style.color = '#FF0000';
@@ -1228,8 +1291,6 @@
                 console.log('Paused due to mouse movement');
                 return;
             }
-            
-            ensureCheckboxChecked();
             
             const buyPrice = document.getElementById('buy-price').textContent;
             const sellPrice = document.getElementById('sell-price').textContent;
