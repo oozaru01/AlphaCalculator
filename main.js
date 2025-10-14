@@ -336,9 +336,9 @@
                 <button id="auto-buy" style="padding:4px 8px; cursor:pointer; background:#2E7D32; border:none; border-radius:4px; color:white; font-size:11px;">Buy</button>
             </div>
             <div style="font-size:11px; margin-bottom:2px;">
-                Max Loss: <input id="max-loss" type="number" value="10" step="0.1" style="width:40px; padding:2px; background:#333; color:white; border:1px solid #555; border-radius:3px; font-size:11px;" />
+                Max Loss: <input id="max-loss" type="number" value="2" step="0.1" style="width:40px; padding:2px; background:#333; color:white; border:1px solid #555; border-radius:3px; font-size:11px;" />
                 Max/Hr: <input id="max-trades-hour" type="number" value="300" min="1" style="width:40px; padding:2px; background:#333; color:white; border:1px solid #555; border-radius:3px; font-size:11px;" />
-                Delay: <input id="trade-delay" type="number" value="4" min="1" max="10" style="width:35px; padding:2px; background:#333; color:white; border:1px solid #555; border-radius:3px; font-size:11px;" />s
+                Delay: <input id="trade-delay" type="number" value="2" min="1" max="10" style="width:35px; padding:2px; background:#333; color:white; border:1px solid #555; border-radius:3px; font-size:11px;" />s
             </div>
             <div style="display:flex; align-items:center; gap:4px; margin-top:6px; padding-top:6px; border-top:1px solid #555;">
                 <input id="bulk-trades" type="number" value="10" min="1" style="width:40px; padding:2px; background:#333; color:white; border:1px solid #555; border-radius:3px; font-size:11px;" />
@@ -346,6 +346,9 @@
                 <button id="bulk-pause" style="padding:4px 10px; cursor:pointer; background:#F44336; border:none; border-radius:4px; color:white; font-size:11px; font-weight:bold; display:none;">Pause</button>
                 <button id="bulk-stop" style="padding:4px 10px; cursor:pointer; background:#D32F2F; border:none; border-radius:4px; color:white; font-size:11px; font-weight:bold; display:none;">Stop</button>
                 <button id="clear-history" style="padding:4px 10px; cursor:pointer; background:#9C27B0; border:none; border-radius:4px; color:white; font-size:11px;">Clear</button>
+            </div>
+            <div style="margin-top:4px;">
+                <button id="test-telegram" style="padding:4px 10px; cursor:pointer; background:#0088cc; border:none; border-radius:4px; color:white; font-size:11px; width:100%;">📱 Test Telegram</button>
             </div>
             <div id="bulk-status" style="margin-top:4px; font-size:11px; color:#FFD700;"></div>
         `;
@@ -482,7 +485,7 @@
         });
         
         // Prevent inputs from triggering drag
-        ['user-nickname', 'trade-amount', 'bulk-trades', 'bulk-pause', 'bulk-stop', 'max-loss', 'max-trades-hour', 'trade-delay', 'clear-history'].forEach(id => {
+        ['user-nickname', 'trade-amount', 'bulk-trades', 'bulk-pause', 'bulk-stop', 'max-loss', 'max-trades-hour', 'trade-delay', 'clear-history', 'test-telegram'].forEach(id => {
             const el = document.getElementById(id);
             if (el) el.addEventListener('mousedown', (e) => e.stopPropagation());
         });
@@ -502,11 +505,38 @@
             }
         });
         
+        // Test Telegram button
+        document.getElementById('test-telegram').addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const btn = e.target;
+            btn.textContent = 'Sending...';
+            btn.disabled = true;
+            
+            const nickname = localStorage.getItem('traderNickname') || 'Trader';
+            const message = `<b>[${nickname}]</b> - ${new Date().toLocaleString()}\n\n` +
+                `🧪 <b>Test Message</b>\n\n` +
+                `✅ Telegram bot is working correctly!\n` +
+                `📊 Current Balance: ${window.currentBalance.toFixed(2)} USDT`;
+            
+            await sendTelegramMessage(message);
+            
+            btn.textContent = '✓ Sent!';
+            setTimeout(() => {
+                btn.textContent = '📱 Test Telegram';
+                btn.disabled = false;
+            }, 2000);
+        });
+        
         // Send message to Telegram
         async function sendTelegramMessage(message) {
+            console.log('Sending Telegram message...');
+            console.log('Bot Token:', TELEGRAM_BOT_TOKEN);
+            console.log('Chat ID:', TELEGRAM_CHAT_ID);
+            console.log('Message:', message);
+            
             try {
                 const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-                await fetch(url, {
+                const response = await fetch(url, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -515,8 +545,19 @@
                         parse_mode: 'HTML'
                     })
                 });
+                
+                const result = await response.json();
+                console.log('Telegram API response:', result);
+                
+                if (!result.ok) {
+                    console.error('Telegram API error:', result.description);
+                    alert(`Telegram error: ${result.description}`);
+                } else {
+                    console.log('Message sent successfully!');
+                }
             } catch (e) {
-                console.log('Telegram send error:', e);
+                console.error('Telegram send error:', e);
+                alert(`Failed to send Telegram message: ${e.message}`);
             }
         }
         
@@ -616,7 +657,7 @@
         
         // Safety checks
         function checkMaxLoss() {
-            const maxLoss = parseFloat(document.getElementById('max-loss').value) || 10;
+            const maxLoss = parseFloat(document.getElementById('max-loss').value) || 2;
             const totalLoss = getTotalLossFromStorage();
             return totalLoss < maxLoss;
         }
@@ -807,7 +848,7 @@
                     
                     // Random delay after successful trade
                     if (result === 'completed') {
-                        const maxDelay = parseInt(document.getElementById('trade-delay')?.value) || 4;
+                        const maxDelay = parseInt(document.getElementById('trade-delay')?.value) || 2;
                         const delay = 1000 + Math.random() * (maxDelay - 1) * 1000;
                         statusEl.textContent = `Trade ${i + 1}/${tradesCount}: Waiting ${(delay/1000).toFixed(1)}s...`;
                         await new Promise(r => setTimeout(r, delay));
@@ -818,18 +859,15 @@
             }
             
             const finalLoss = getTotalLossFromStorage();
-            const wasCompleted = isExecuting; // Check if completed naturally or stopped
             statusEl.textContent = `Completed! Total Loss: ${finalLoss.toFixed(6)} USDT`;
             statusEl.style.color = '#4CAF50';
             startBtn.style.display = 'inline-block';
             pauseBtn.style.display = 'none';
             document.getElementById('bulk-stop').style.display = 'none';
-            isExecuting = false;
-            isPaused = false;
-            console.log('Bulk trading completed, stopping execution');
             
-            // Send Telegram notification only if completed naturally
-            if (wasCompleted && completedTradesCount > 0) {
+            // Send Telegram notification if any trades completed
+            console.log('Checking Telegram notification conditions:', { isExecuting, completedTradesCount });
+            if (isExecuting && completedTradesCount > 0) {
                 const nickname = localStorage.getItem('traderNickname') || 'Trader';
                 const trades = JSON.parse(localStorage.getItem('binanceTrades') || '[]');
                 const recentTrades = trades.slice(-tradesCount);
@@ -844,8 +882,15 @@
                     `💰 Session Loss: ${totalLoss.toFixed(6)} USDT\n` +
                     `📈 Cumulative Loss: ${finalLoss.toFixed(6)} USDT`;
                 
+                console.log('Sending Telegram notification...');
                 sendTelegramMessage(message);
+            } else {
+                console.log('Skipping Telegram notification - isExecuting:', isExecuting, 'completedTradesCount:', completedTradesCount);
             }
+            
+            isExecuting = false;
+            isPaused = false;
+            console.log('Bulk trading completed, stopping execution');
             
             setTimeout(() => {
                 statusEl.textContent = '';
