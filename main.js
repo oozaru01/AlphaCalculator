@@ -8,6 +8,7 @@
 
 (function() {
     'use strict';
+    console.log('🐕 YellowDoge TamperMonkey script loaded!');
 
     // Create overlay div with given styles and title
     function makeOverlay(id, title, position) {
@@ -92,6 +93,7 @@
     }
 
     async function main() {
+        console.log('YellowDoge script starting...');
         // Global variables
         window.currentBalance = 0;
         window.livePrice = null;
@@ -107,6 +109,14 @@
         // Telegram configuration
         const TELEGRAM_BOT_TOKEN = '8394008255:AAH7r1AHxSYx8iFFP32mfUOvOWg3o_NocxA';
         const TELEGRAM_CHAT_ID = '@LeonTradingBot';
+        
+        // Generate UUID v4
+        function generateUUID() {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+                const r = Math.random() * 16 | 0;
+                return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+            });
+        }
         
         // Enhanced WebSocket and data interception
         function interceptWebSocket() {
@@ -316,14 +326,25 @@
         
         // Get token name
         function getTokenName() {
-            return getXPathElement('/html/body/div[4]/div/div[2]/div/div/div[1]/div[3]/div[1]')?.textContent.trim() || 'Unknown';
+            try {
+                return getXPathElement('/html/body/div[4]/div/div[2]/div/div/div[1]/div[3]/div[1]')?.textContent.trim() || 'Unknown';
+            } catch (e) {
+                console.error('getTokenName error:', e);
+                return 'Unknown';
+            }
         }
         
+        console.log('Creating overlay...');
         // Create single overlay
-        const overlay = makeOverlay('trading-overlay', `🐕 YellowDoge - ${getTokenName()}`, {top: '12px', left: '12px'});
+        const overlay = makeOverlay('trading-overlay', '🐕 YellowDoge', {top: '12px', left: '12px'});
+        console.log('Overlay created:', overlay);
+        
+        // Minimize state
+        let isMinimized = localStorage.getItem('overlayMinimized') === 'true';
         
         // Update overlay content structure
         const overlayHTML = `
+            <button id="toggle-minimize" style="position:absolute; top:4px; right:4px; padding:2px 6px; cursor:pointer; background:#555; border:none; border-radius:3px; color:white; font-size:10px;">−</button>
             <div style="font-size:11px; margin-bottom:4px;">
                 Nickname: <input id="user-nickname" type="text" placeholder="Enter name" value="${localStorage.getItem('traderNickname') || ''}" style="width:100px; padding:2px; background:#333; color:white; border:1px solid #555; border-radius:3px; font-size:11px;" />
             </div>
@@ -358,6 +379,10 @@
                 Max Loss: <input id="max-loss" type="number" value="${localStorage.getItem('maxLoss') || '2'}" step="0.1" style="width:50px; padding:2px; background:#333; color:white; border:1px solid #555; border-radius:3px; font-size:11px;" />
                 Delay: <input id="trade-delay" type="number" value="${localStorage.getItem('tradeDelay') || '2'}" min="1" max="10" style="width:40px; padding:2px; background:#333; color:white; border:1px solid #555; border-radius:3px; font-size:11px;" />s
             </div>
+            <div style="font-size:11px; margin-bottom:4px;">
+                Spread: <input id="buy-spread" type="number" value="${localStorage.getItem('buySpread') || '0.06'}" min="0.01" max="0.2" step="0.01" style="width:50px; padding:2px; background:#333; color:white; border:1px solid #555; border-radius:3px; font-size:11px;" />%
+                <button id="update-spread" style="padding:2px 8px; cursor:pointer; background:#4CAF50; border:none; border-radius:3px; color:white; font-size:10px;">Update</button>
+            </div>
             <div style="display:flex; align-items:center; gap:4px; margin-top:6px; padding-top:6px; border-top:1px solid #555;">
                 <input id="bulk-trades" type="number" value="${localStorage.getItem('bulkTrades') || '10'}" min="1" style="width:40px; padding:2px; background:#333; color:white; border:1px solid #555; border-radius:3px; font-size:11px;" />
                 <button id="bulk-start" style="padding:4px 10px; cursor:pointer; background:#FF9800; border:none; border-radius:4px; color:white; font-size:11px; font-weight:bold;">Start</button>
@@ -380,6 +405,33 @@
         `;
         document.getElementById('trading-overlay-content').innerHTML = overlayHTML;
         originalContent = overlayHTML;
+        console.log('Overlay HTML populated successfully');
+        
+        // Toggle minimize
+        function updateMinimizeState() {
+            const content = document.getElementById('trading-overlay-content');
+            const btn = document.getElementById('toggle-minimize');
+            if (isMinimized) {
+                content.innerHTML = `<button id="toggle-minimize" style="position:absolute; top:4px; right:4px; padding:2px 6px; cursor:pointer; background:#555; border:none; border-radius:3px; color:white; font-size:10px;">+</button><div style="font-size:16px; font-weight:bold; text-align:center; padding:10px;">YellowDoge - ${completedTradesCount}/${document.getElementById('bulk-trades')?.value || 0} trade</div>`;
+                document.getElementById('toggle-minimize').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    isMinimized = false;
+                    localStorage.setItem('overlayMinimized', 'false');
+                    updateMinimizeState();
+                });
+            } else {
+                content.innerHTML = overlayHTML;
+                attachEventListeners();
+            }
+        }
+        
+        function attachEventListeners() {
+            document.getElementById('toggle-minimize')?.addEventListener('click', (e) => {
+                e.stopPropagation();
+                isMinimized = true;
+                localStorage.setItem('overlayMinimized', 'true');
+                updateMinimizeState();
+            });
         
         // Helper to simulate human-like mouse movement
         function simulateMouseMove(element) {
@@ -467,8 +519,8 @@
             }
         }
         
-        // Add button handlers
-        document.getElementById('fill-buy').addEventListener('click', (e) => {
+            // Fill buy button
+            document.getElementById('fill-buy').addEventListener('click', (e) => {
             e.stopPropagation();
             
             const buyPrice = document.getElementById('buy-price').textContent;
@@ -504,13 +556,13 @@
                         }, 100);
                     }, 200);
                 }, 100);
-                e.target.textContent = '✓';
-                setTimeout(() => e.target.textContent = 'Fill', 2000);
-            }
-        });
+                    e.target.textContent = '✓';
+                    setTimeout(() => e.target.textContent = 'Fill', 2000);
+                }
+            });
         
-        // Save config button
-        document.getElementById('save-config').addEventListener('click', (e) => {
+            // Save config button
+            document.getElementById('save-config').addEventListener('click', (e) => {
             e.stopPropagation();
             localStorage.setItem('hoverX', document.getElementById('hover-x').value);
             localStorage.setItem('traderNickname', document.getElementById('user-nickname').value);
@@ -518,15 +570,22 @@
             localStorage.setItem('maxLoss', document.getElementById('max-loss').value);
             localStorage.setItem('tradeDelay', document.getElementById('trade-delay').value);
             localStorage.setItem('bulkTrades', document.getElementById('bulk-trades').value);
+            localStorage.setItem('buySpread', document.getElementById('buy-spread').value);
             localStorage.setItem('lossInput', document.getElementById('loss-input').value);
-            log('✓ Configuration saved');
-        });
+                log('✓ Configuration saved');
+            });
         
-        // Prevent inputs from triggering drag
-        ['user-nickname', 'hover-x', 'save-config', 'trade-amount', 'bulk-trades', 'bulk-pause', 'bulk-stop', 'max-loss', 'trade-delay', 'clear-history', 'test-telegram', 'loss-input', 'update-loss-btn', 'log-output', 'clear-log', 'detailed-report', 'console-log-enabled'].forEach(id => {
-            const el = document.getElementById(id);
-            if (el) el.addEventListener('mousedown', (e) => e.stopPropagation());
-        });
+            // Prevent inputs from triggering drag
+            ['user-nickname', 'hover-x', 'save-config', 'trade-amount', 'bulk-trades', 'bulk-pause', 'bulk-stop', 'max-loss', 'trade-delay', 'buy-spread', 'update-spread', 'clear-history', 'test-telegram', 'loss-input', 'update-loss-btn', 'log-output', 'clear-log', 'detailed-report', 'console-log-enabled', 'toggle-minimize'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.addEventListener('mousedown', (e) => e.stopPropagation());
+            });
+        
+            // Other event listeners...
+        }
+        
+        attachEventListeners();
+        if (isMinimized) updateMinimizeState();
         
         // Log function that appends to textarea
         function log(message) {
@@ -551,6 +610,19 @@
         // Save nickname to localStorage on change
         document.getElementById('user-nickname').addEventListener('input', (e) => {
             localStorage.setItem('traderNickname', e.target.value);
+        });
+        
+        // Update spread button
+        document.getElementById('update-spread').addEventListener('click', (e) => {
+            e.stopPropagation();
+            const spreadInput = document.getElementById('buy-spread');
+            const value = parseFloat(spreadInput.value);
+            if (!isNaN(value) && value >= 0.01 && value <= 0.2) {
+                buySpreadPercent = value;
+                localStorage.setItem('buySpread', value.toString());
+                updateDisplay();
+                log(`✓ Spread updated to ${value}%`);
+            }
         });
         
         // Update loss button
@@ -757,7 +829,7 @@
                     if (buyNotification && (buyNotification.textContent.includes('Buy Order Filled') || buyNotification.textContent.includes('Sell Order Filled'))) {
                         console.log('Order filled notification detected:', buyNotification.textContent);
                         const closeBtn = document.querySelector('.bn-notification-close');
-                        if (closeBtn) closeBtn.click();
+                        if (closeBtn && typeof closeBtn.click === 'function') closeBtn.click();
                     }
                 } catch (error) {
                     log(`⚠ Error in wait loop: ${error.message}`);
@@ -805,7 +877,11 @@
         let isExecuting = false;
         let isPaused = false;
         let completedTradesCount = 0;
+        let attemptedTradesCount = 0;
         let balanceBeforeSession = 0;
+        let sessionCorrelationId = '';
+        let tradeResults = { completed: 0, cancelled: 0, price_moved: 0, cleanup: 0, timeout: 0 };
+        let buySpreadPercent = parseFloat(localStorage.getItem('buySpread')) || 0.06;
         async function executeBulkTrades() {
             if (isExecuting) {
                 console.log('Already executing, stopping current execution');
@@ -856,8 +932,35 @@
             
             console.log('Reverse Order checkbox is checked - proceeding');
             
+            // Get buy spread from input
+            buySpreadPercent = parseFloat(document.getElementById('buy-spread').value) || 0.03;
+            
+            sessionCorrelationId = generateUUID();
+            log(`Session ID: ${sessionCorrelationId}`);
+            
+            // Capture balance IMMEDIATELY after Start clicked
+            balanceBeforeSession = window.currentBalance;
+            log(`Session starting balance: ${balanceBeforeSession.toFixed(2)} USDT`);
+            
             const tradesCount = parseInt(document.getElementById('bulk-trades').value) || 10;
+            const tradeAmount = parseFloat(document.getElementById('trade-amount').value) || 1;
+            const maxLoss = parseFloat(document.getElementById('max-loss').value) || 2;
+            const tradeDelay = parseInt(document.getElementById('trade-delay').value) || 2;
             const statusEl = document.getElementById('bulk-status');
+            
+            // Send start notification
+            const nickname = localStorage.getItem('traderNickname') || 'Trader';
+            let tokenName = getTokenName();
+            const startMessage = `<b>[${nickname}]</b> - ${new Date().toLocaleString()}\n` +
+                `🔑 ID: <code>${sessionCorrelationId}</code>\n\n` +
+                `🚀 <b>Trading Session Started</b>\n` +
+                `🪙 Token: ${tokenName}\n\n` +
+                `💵 Amount per Trade: ${tradeAmount} USDT\n` +
+                `🔢 Number of Trades: ${tradesCount}\n` +
+                `⚠️ Max Loss: ${maxLoss} USDT\n` +
+                `📊 Spread: ${buySpreadPercent}%\n` +
+                `⏱️ Delay: ${tradeDelay}s`;
+            await sendTelegramMessage(startMessage);
             
             // Countdown before starting
             statusEl.textContent = 'Starting in 3...';
@@ -872,6 +975,7 @@
             isExecuting = true;
             isPaused = false;
             completedTradesCount = 0;
+            attemptedTradesCount = 0;
             sessionVolume = 0;
             const totalLossEl = document.getElementById('bulk-total-loss');
             const startBtn = document.getElementById('bulk-start');
@@ -881,10 +985,6 @@
             pauseBtn.style.display = 'inline-block';
             document.getElementById('bulk-stop').style.display = 'inline-block';
             
-            // Capture balance BEFORE any cleanup
-            balanceBeforeSession = window.currentBalance;
-            log(`Session starting balance: ${balanceBeforeSession.toFixed(2)} USDT`);
-            
             // Initial cleanup check
             statusEl.textContent = 'Checking prerequisites...';
             statusEl.style.color = '#FFD700';
@@ -892,7 +992,7 @@
             await new Promise(r => setTimeout(r, 500));
             
             // Check holdings and sell if > $0.5
-            const tokenName = getTokenName();
+            tokenName = getTokenName();
             const holdingsTab = document.querySelector('#bn-tab-holdings');
             if (holdingsTab) holdingsTab.click();
             await new Promise(r => setTimeout(r, 500));
@@ -943,12 +1043,13 @@
                 if (!isExecuting) break;
                 
                 // Check prerequisites before trade
-                const tokenName = getTokenName();
+                tokenName = getTokenName();
                 
                 // Check Holdings tab - token value must be < $1
                 const holdingsTab = document.querySelector('#bn-tab-holdings');
                 if (holdingsTab) holdingsTab.click();
                 await new Promise(r => setTimeout(r, 500));
+                if (!isExecuting) break;
                 
                 const row = Array.from(document.querySelectorAll('table tbody tr')).find(r => r.textContent.includes(tokenName));
                 if (row) {
@@ -984,15 +1085,30 @@
                 const openOrdersTab = document.querySelector('#bn-tab-orderOrder > div:nth-child(1)');
                 if (openOrdersTab) openOrdersTab.click();
                 await new Promise(r => setTimeout(r, 500));
+                if (!isExecuting) break;
                 
-                // Check Open Orders - no orders for current token
+                // Check Open Orders - cleanup if orders exist
                 const orderSection = getXPathElement('/html/body/div[4]/div/div[3]/div/div[8]/div/div/div/div/div[2]/div[1]/div');
                 if (orderSection) {
                     const orderText = orderSection.textContent;
                     if (orderText.includes(tokenName) && (orderText.includes('Buy') || orderText.includes('Sell'))) {
-                        log(`⚠ Open orders exist for ${tokenName}, skipping trade`);
-                        statusEl.textContent = `Trade ${i + 1}: Open orders exist, skipping`;
+                        log(`⚠ Open orders exist for ${tokenName}, cleaning up...`);
+                        statusEl.textContent = `Trade ${i + 1}: Cleaning existing orders...`;
+                        
+                        // Cancel all orders first
+                        const cancelAllBtn = getXPathElement('/html/body/div[4]/div/div[3]/div/div[8]/div/div/div/div/div[2]/div[1]/div/div[3]/div/div/div[1]/table/thead/tr/th[9]/div');
+                        if (cancelAllBtn) {
+                            log('Canceling all orders...');
+                            humanClick(cancelAllBtn);
+                            await new Promise(r => setTimeout(r, 500));
+                            await clickCancelConfirmWithRetry();
+                            await new Promise(r => setTimeout(r, 1000));
+                        }
+                        
+                        // Execute sell if needed
+                        await cleanupStuckSellOrder();
                         await new Promise(r => setTimeout(r, 2000));
+                        balanceBeforeTrade = window.currentBalance;
                         continue;
                     }
                 }
@@ -1048,6 +1164,7 @@
                     }
                 }
                 await new Promise(r => setTimeout(r, 100)); // Wait for UI stability
+                if (!isExecuting) break;
                 
                 const buyPriceInput = document.getElementById('limitPrice');
                 const limitTotalInputs = document.querySelectorAll('input#limitTotal');
@@ -1123,20 +1240,16 @@
                     const result = await waitForTradeCompletion(entryPrice);
                     clearInterval(waitInterval);
                     
-                    // Get actual fill prices for slippage check
-                    const actualBuyPrice = parseFloat(prices.buy);
-                    const expectedBuyPrice = parseFloat(prices.buy);
-                    const slippage = Math.abs((actualBuyPrice - expectedBuyPrice) / expectedBuyPrice * 100);
+                    if (!isExecuting) break;
                     
-                    if (slippage > 0.1) {
-                        statusEl.textContent = `Trade ${i + 1}: SLIPPAGE WARNING ${slippage.toFixed(3)}%`;
-                        statusEl.style.color = '#FFA500';
-                    } else {
-                        statusEl.textContent = `Trade ${i + 1}/${tradesCount}: ${result}`;
-                    }
+                    log(`Result: ${result}`);
                     
-                    // Only calculate loss and save if trade completed successfully (not cleanup)
+                    statusEl.textContent = `Trade ${i + 1}/${tradesCount}: ${result}`;
+                    
+                    // Only calculate loss and save if trade completed successfully
                     if (result === 'completed') {
+                        completedTradesCount++;
+                        if (isMinimized) updateMinimizeState();
                         // Calculate actual loss from balance delta
                         await new Promise(r => setTimeout(r, 1000)); // Wait for balance update
                         const balanceAfterTrade = window.currentBalance;
@@ -1151,12 +1264,10 @@
                             amount: amount,
                             lossPercent: prices.loss,
                             actualLoss: actualLoss.toFixed(6),
-                            result: result,
-                            slippage: slippage.toFixed(3)
+                            result: result
                         };
                         saveTradeToStorage(tradeData);
                         localStorage.removeItem('manualLossAdjustment'); // Clear manual override
-                        completedTradesCount++;
                         sessionVolume += amount;
                         log(`✓ Trade #${completedTradesCount} completed, Loss: ${actualLoss.toFixed(6)} USDT`);
                         
@@ -1165,34 +1276,37 @@
                         if (totalLossEl) {
                             totalLossEl.textContent = getTotalLossFromStorage().toFixed(6);
                         }
-                    } else {
-                        log(`⚠ Trade cancelled/failed: ${result}`);
-                    }
-                    
-                    // Delay after trade regardless of result
-                    if (result === 'completed') {
+                        
+                        // Delay after successful trade
                         const maxDelay = parseInt(document.getElementById('trade-delay')?.value) || 2;
                         const delay = 1000 + Math.random() * (maxDelay - 1) * 1000;
                         statusEl.textContent = `Trade ${i + 1}/${tradesCount}: Waiting ${(delay/1000).toFixed(1)}s...`;
-                        await new Promise(r => setTimeout(r, delay));
+                        
+                        // Check isExecuting during delay
+                        const delayStart = Date.now();
+                        while (Date.now() - delayStart < delay && isExecuting) {
+                            await new Promise(r => setTimeout(r, 100));
+                        }
+                        if (!isExecuting) break;
                     } else {
-                        // Wait longer after cancellation to ensure UI is ready
-                        log('Waiting 2s after cancellation...');
+                        log(`⚠ Trade failed: ${result}`);
+                        i--;
+                        log('Waiting 2s before retry...');
                         await new Promise(r => setTimeout(r, 2000));
                     }
                 }
             }
             
             const finalLoss = getTotalLossFromStorage();
-            statusEl.textContent = `Completed! Total Loss: ${finalLoss.toFixed(6)} USDT`;
+            statusEl.textContent = `Completed! Refreshing...`;
             statusEl.style.color = '#4CAF50';
             startBtn.style.display = 'inline-block';
             pauseBtn.style.display = 'none';
             document.getElementById('bulk-stop').style.display = 'none';
             
-            // Send Telegram notification if any trades completed
+            // Send Telegram notification
             console.log('Checking Telegram notification conditions:', { isExecuting, completedTradesCount });
-            if (isExecuting && completedTradesCount > 0) {
+            if (isExecuting) {
                 const nickname = localStorage.getItem('traderNickname') || 'Trader';
                 const trades = JSON.parse(localStorage.getItem('binanceTrades') || '[]');
                 const recentTrades = trades.slice(-completedTradesCount);
@@ -1200,7 +1314,7 @@
                 const tradeAmount = parseFloat(document.getElementById('trade-amount').value) || 1;
                 
                 // Get token holdings value
-                const tokenName = getTokenName();
+                tokenName = getTokenName();
                 const holdingsTab = document.querySelector('#bn-tab-holdings');
                 if (holdingsTab) holdingsTab.click();
                 await new Promise(r => setTimeout(r, 500));
@@ -1219,23 +1333,24 @@
                 await new Promise(r => setTimeout(r, 300));
                 
                 const balanceAfterSession = window.currentBalance + tokenHoldingsValue;
-                const actualSessionLoss = balanceBeforeSession - balanceAfterSession;
+                const sessionPnL = balanceAfterSession - balanceBeforeSession;
                 const percentageChange = ((balanceAfterSession - balanceBeforeSession) / balanceBeforeSession * 100).toFixed(3);
-                const changeEmoji = percentageChange >= 0 ? '📈' : '📉';
+                const changeEmoji = sessionPnL > 0 ? '🎉💰' : (sessionPnL < 0 ? '📉' : '➡️');
+                const pnlLabel = sessionPnL >= 0 ? 'Profit' : 'Loss';
+                const celebrationMsg = sessionPnL > 0 ? '\n\n🔥💵 PROFIT PROFIT 💵🔥\n💎🚀 TO THE MOON 🚀💎' : '';
                 const detailedReport = document.getElementById('detailed-report').checked;
                 
-                let message = `<b>[${nickname}]</b> - ${new Date().toLocaleString()}\n\n` +
+                let message = `<b>[${nickname}]</b> - ${new Date().toLocaleString()}\n` +
+                    `🔑 ID: <code>${sessionCorrelationId}</code>\n\n` +
                     `🤖 <b>Trading Session Completed</b>\n` +
                     `🪙 Token: ${tokenName}\n\n` +
-                    `📊 Total Trades: ${tradesCount}\n` +
                     `✅ Completed: ${completedTradesCount}\n` +
-                    `❌ Cancelled: ${cancelledCount}\n` +
                     `💵 Amount per Trade: ${tradeAmount} USDT\n` +
                     `📈 Total Volume: ${sessionVolume.toFixed(2)} USDT\n` +
-                    `💰 Session Loss: ${actualSessionLoss.toFixed(6)} USDT\n` +
+                    `💰 Session ${pnlLabel}: ${Math.abs(sessionPnL).toFixed(6)} USDT\n` +
                     `📊 Balance Before: ${balanceBeforeSession.toFixed(2)} USDT\n` +
                     `📊 Balance After: ${balanceAfterSession.toFixed(2)} USDT\n` +
-                    `${changeEmoji} Change: ${percentageChange}%`;
+                    `${changeEmoji} Change: ${percentageChange}%${celebrationMsg}`;
                 
                 if (detailedReport && recentTrades.length > 0) {
                     message += `\n\n📋 <b>Trade Details:</b>\n`;
@@ -1255,12 +1370,11 @@
             
             isExecuting = false;
             isPaused = false;
-            console.log('Bulk trading completed, stopping execution');
+            console.log('Bulk trading completed, refreshing browser...');
             
             setTimeout(() => {
-                statusEl.textContent = '';
-                statusEl.style.color = '#FFD700';
-            }, 5000);
+                location.reload();
+            }, 2000);
         }
         
         document.getElementById('bulk-start').addEventListener('click', (e) => {
@@ -1293,14 +1407,13 @@
                 const stopBtn = document.getElementById('bulk-stop');
                 
                 // Send Telegram notification before stopping
-                if (completedTradesCount > 0) {
-                    const nickname = localStorage.getItem('traderNickname') || 'Trader';
+                const nickname = localStorage.getItem('traderNickname') || 'Trader';
                     const trades = JSON.parse(localStorage.getItem('binanceTrades') || '[]');
                     const recentTrades = trades.slice(-completedTradesCount);
                     const tradeAmount = parseFloat(document.getElementById('trade-amount').value) || 1;
                     
                     // Get token holdings value
-                    const tokenName = getTokenName();
+                    tokenName = getTokenName();
                     const holdingsTab = document.querySelector('#bn-tab-holdings');
                     if (holdingsTab) holdingsTab.click();
                     await new Promise(r => setTimeout(r, 500));
@@ -1319,21 +1432,24 @@
                     await new Promise(r => setTimeout(r, 300));
                     
                     const balanceAfterSession = window.currentBalance + tokenHoldingsValue;
-                    const actualSessionLoss = balanceBeforeSession - balanceAfterSession;
+                    const sessionPnL = balanceAfterSession - balanceBeforeSession;
                     const percentageChange = ((balanceAfterSession - balanceBeforeSession) / balanceBeforeSession * 100).toFixed(3);
-                    const changeEmoji = percentageChange >= 0 ? '📈' : '📉';
+                    const changeEmoji = sessionPnL > 0 ? '🎉💰' : (sessionPnL < 0 ? '📉' : '➡️');
+                    const pnlLabel = sessionPnL >= 0 ? 'Profit' : 'Loss';
+                    const celebrationMsg = sessionPnL > 0 ? '\n\n🔥💵 PROFIT PROFIT 💵🔥\n💎🚀 TO THE MOON 🚀💎' : '';
                     const detailedReport = document.getElementById('detailed-report').checked;
                     
-                    let message = `<b>[${nickname}]</b> - ${new Date().toLocaleString()}\n\n` +
+                    let message = `<b>[${nickname}]</b> - ${new Date().toLocaleString()}\n` +
+                        `🔑 ID: <code>${sessionCorrelationId}</code>\n\n` +
                         `⛔ <b>Trading Session STOPPED</b>\n` +
                         `🪙 Token: ${tokenName}\n\n` +
-                        `📊 Completed Trades: ${completedTradesCount}\n` +
+                        `✅ Completed: ${completedTradesCount}\n` +
                         `💵 Amount per Trade: ${tradeAmount} USDT\n` +
                         `📈 Total Volume: ${sessionVolume.toFixed(2)} USDT\n` +
-                        `💰 Session Loss: ${actualSessionLoss.toFixed(6)} USDT\n` +
+                        `💰 Session ${pnlLabel}: ${Math.abs(sessionPnL).toFixed(6)} USDT\n` +
                         `📊 Balance Before: ${balanceBeforeSession.toFixed(2)} USDT\n` +
                         `📊 Balance After: ${balanceAfterSession.toFixed(2)} USDT\n` +
-                        `${changeEmoji} Change: ${percentageChange}%`;
+                        `${changeEmoji} Change: ${percentageChange}%${celebrationMsg}`;
                     
                     if (detailedReport && recentTrades.length > 0) {
                         message += `\n\n📋 <b>Trade Details:</b>\n`;
@@ -1344,15 +1460,16 @@
                         });
                     }
                     
-                    console.log('Sending Stop notification...');
-                    await sendTelegramMessage(message);
-                    console.log('Stop notification sent successfully');
-                }
+                console.log('Sending Stop notification...');
+                await sendTelegramMessage(message);
+                console.log('Stop notification sent successfully');
                 
                 isExecuting = false;
                 isPaused = false;
                 completedTradesCount = 0;
+                attemptedTradesCount = 0;
                 sessionVolume = 0;
+                tradeResults = { completed: 0, cancelled: 0, price_moved: 0, cleanup: 0, timeout: 0 };
                 
                 statusEl.textContent = 'STOPPED by user';
                 statusEl.style.color = '#FF0000';
@@ -1938,10 +2055,23 @@
             
             let buyPrice, sellPrice;
             
-            // Use tighter spread based on manual trade analysis: 0.06% total spread
-            // Buy slightly below market, Sell slightly above market
-            buyPrice = currentPrice * 0.9997;  // 0.03% below market
-            sellPrice = currentPrice * 1.0003; // 0.03% above market
+            // Analyze order book to find best sell orders
+            let sellOrders = [];
+            if (tradeBookEl) {
+                const sellRows = tradeBookEl.querySelectorAll('[role="gridcell"]');
+                sellRows.forEach(row => {
+                    const priceEl = row.querySelector('.cursor-pointer');
+                    if (priceEl && priceEl.style.color.includes('rgb(246, 70, 93)')) { // Red = sell orders
+                        const price = parseFloat(priceEl.textContent);
+                        if (!isNaN(price) && price > 0) sellOrders.push(price);
+                    }
+                });
+            }
+            
+            // Split spread: buy higher, sell lower than market
+            const halfSpread = buySpreadPercent / 2 / 100;
+            buyPrice = currentPrice * (1 + halfSpread);
+            sellPrice = currentPrice * (1 - halfSpread);
             
             const lossPercent = ((buyPrice - sellPrice) / buyPrice * 100).toFixed(3);
             const spread = ((buyPrice - sellPrice) / sellPrice * 100).toFixed(4);
