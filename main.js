@@ -413,6 +413,8 @@
             for (let i = 0; i < tradesCount; i++) {
                 if (!isExecuting) break;
                 
+                console.log(`Starting trade ${i + 1}/${tradesCount}`);
+                
                 // Check pause
                 while (isPaused && isExecuting) {
                     statusEl.textContent = `Paused at trade ${i + 1}/${tradesCount}`;
@@ -547,6 +549,7 @@
             pauseBtn.style.display = 'none';
             isExecuting = false;
             isPaused = false;
+            console.log('Bulk trading completed, stopping execution');
             setTimeout(() => {
                 statusEl.textContent = '';
                 statusEl.style.color = '#FFD700';
@@ -613,6 +616,11 @@
         
         // Check and cleanup existing sell orders before starting
         async function cleanupExistingSellOrders() {
+            if (!isExecuting) {
+                console.log('Not executing, skipping cleanup');
+                return false;
+            }
+            
             console.log('Checking for existing sell orders...');
             
             const orderSection = getXPathElement('/html/body/div[4]/div/div[3]/div/div[8]/div/div/div/div/div[2]/div[1]/div');
@@ -685,6 +693,11 @@
         
         // Cleanup stuck sell order by placing aggressive sell
         async function cleanupStuckSellOrder() {
+            if (!isExecuting) {
+                console.log('Not executing, skipping sell order cleanup');
+                return;
+            }
+            
             console.log('Cleaning up stuck sell order...');
             
             // FIRST: Click existing Cancel All button on UI
