@@ -332,9 +332,15 @@
                             return 'cancelled';
                         }
                     } else if (orderText.includes('Sell')) {
-                        console.log('Sell order stuck for 10s, placing cleanup order...');
-                        await cleanupStuckSellOrder();
-                        return 'cleanup';
+                        console.log('Sell order stuck for 10s, canceling all...');
+                        const cancelAllBtn = getXPathElement('/html/body/div[4]/div/div[3]/div/div[8]/div/div/div/div/div[2]/div[1]/div/div[3]/div/div/div[1]/table/thead/tr/th[9]/div') ||
+                                           document.querySelector('th.bn-web-table-cell:nth-child(9)');
+                        if (cancelAllBtn) {
+                            humanClick(cancelAllBtn);
+                            await new Promise(r => setTimeout(r, 200));
+                            await clickCancelConfirmWithRetry();
+                            return 'cancelled';
+                        }
                     }
                 }
                 
@@ -637,19 +643,37 @@
                 
                 if (!currentToken || orderText.includes(currentToken)) {
                     console.log('Existing sell orders found for current token, cleaning up...');
-                    await cleanupStuckSellOrder();
-                    // Wait max 30 seconds for cleanup completion
-                    let cleanupWait = 0;
-                    while (cleanupWait < 30) {
-                        await new Promise(r => setTimeout(r, 1000));
-                        cleanupWait++;
-                        const updatedSection = getXPathElement('/html/body/div[4]/div/div[3]/div/div[8]/div/div/div/div/div[2]/div[1]/div');
-                        if (updatedSection && updatedSection.textContent.includes('No Ongoing Orders')) {
-                            console.log('Cleanup completed');
-                            break;
+                    
+                    // Never give up - keep trying until all orders are cleared
+                    while (true) {
+                        // First: Cancel all open orders
+                        const cancelAllBtn = getXPathElement('/html/body/div[4]/div/div[3]/div/div[8]/div/div/div/div/div[2]/div[1]/div/div[3]/div/div/div[1]/table/thead/tr/th[9]/div') ||
+                                           document.querySelector('th.bn-web-table-cell:nth-child(9)');
+                        if (cancelAllBtn) {
+                            console.log('Canceling all open orders');
+                            humanClick(cancelAllBtn);
+                            await new Promise(r => setTimeout(r, 500));
+                            await clickCancelConfirmWithRetry();
+                            await new Promise(r => setTimeout(r, 2000));
                         }
+                        
+                        // Then: Sell all remaining tokens
+                        await cleanupStuckSellOrder();
+                        
+                        // Wait 10 seconds and check if cleanup completed
+                        let cleanupWait = 0;
+                        while (cleanupWait < 10) {
+                            await new Promise(r => setTimeout(r, 1000));
+                            cleanupWait++;
+                            const updatedSection = getXPathElement('/html/body/div[4]/div/div[3]/div/div[8]/div/div/div/div/div[2]/div[1]/div');
+                            if (updatedSection && updatedSection.textContent.includes('No Ongoing Orders')) {
+                                console.log('All orders cleared successfully');
+                                return true;
+                            }
+                        }
+                        
+                        console.log('Orders still exist, repeating cleanup process...');
                     }
-                    return true;
                 } else {
                     console.log('Sell orders found but not for current token, skipping cleanup');
                 }
@@ -759,10 +783,25 @@
                 console.log('Slider container not found!');
             }
             
-            // Click sell button directly (skip price input)
+            // Get aggressive sell price for instant fill
+            const { currentPrice } = getMarketData();
+            if (currentPrice) {
+                // Extra aggressive sell price - 0.5% below market for guaranteed instant fill
+                const aggressiveSellPrice = (currentPrice * 0.995).toFixed(8);
+                const sellPriceInput = document.getElementById('limitPrice');
+                if (sellPriceInput) {
+                    console.log('Setting aggressive sell price for instant fill:', aggressiveSellPrice);
+                    sellPriceInput.focus();
+                    await new Promise(r => setTimeout(r, 100));
+                    setReactValue(sellPriceInput, aggressiveSellPrice);
+                    await new Promise(r => setTimeout(r, 200));
+                }
+            }
+            
+            // Click sell button
             const sellButton = document.querySelector('.bn-button.bn-button__sell');
             if (sellButton) {
-                console.log('Clicking Sell button');
+                console.log('Placing limit sell order');
                 simulateMouseMove(sellButton);
                 await new Promise(r => setTimeout(r, randomDelay(30, 50)));
                 humanClick(sellButton);
