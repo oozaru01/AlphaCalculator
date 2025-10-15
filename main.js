@@ -342,6 +342,16 @@
         // Minimize state
         let isMinimized = localStorage.getItem('overlayMinimized') === 'true';
         
+        // Bulk trade execution variables (declare early for minimize function)
+        let isExecuting = false;
+        let isPaused = false;
+        let completedTradesCount = 0;
+        let balanceBeforeSession = 0;
+        let sessionCorrelationId = '';
+        let buySpreadPercent = parseFloat(localStorage.getItem('buySpread')) || 0.06;
+        let currentBatch = 0;
+        let totalBatches = 1;
+        
         // Update overlay content structure
         const overlayHTML = `
             <button id="toggle-minimize" style="position:absolute; top:4px; right:4px; padding:2px 6px; cursor:pointer; background:#555; border:none; border-radius:3px; color:white; font-size:10px;">−</button>
@@ -385,6 +395,7 @@
             </div>
             <div style="display:flex; align-items:center; gap:4px; margin-top:6px; padding-top:6px; border-top:1px solid #555;">
                 <input id="bulk-trades" type="number" value="${localStorage.getItem('bulkTrades') || '10'}" min="1" style="width:40px; padding:2px; background:#333; color:white; border:1px solid #555; border-radius:3px; font-size:11px;" />
+                x <input id="batch-count" type="number" value="${localStorage.getItem('batchCount') || '1'}" min="1" max="10" style="width:30px; padding:2px; background:#333; color:white; border:1px solid #555; border-radius:3px; font-size:11px;" />
                 <button id="bulk-start" style="padding:4px 10px; cursor:pointer; background:#FF9800; border:none; border-radius:4px; color:white; font-size:11px; font-weight:bold;">Start</button>
                 <button id="bulk-pause" style="padding:4px 10px; cursor:pointer; background:#F44336; border:none; border-radius:4px; color:white; font-size:11px; font-weight:bold; display:none;">Pause</button>
                 <button id="bulk-stop" style="padding:4px 10px; cursor:pointer; background:#D32F2F; border:none; border-radius:4px; color:white; font-size:11px; font-weight:bold; display:none;">Stop</button>
@@ -439,15 +450,15 @@
         // Helper to simulate human-like click
         function humanClick(element) {
             const rect = element.getBoundingClientRect();
-            const x = rect.left + rect.width / 2 + (Math.random() - 0.5) * 4;
-            const y = rect.top + rect.height / 2 + (Math.random() - 0.5) * 4;
+            const x = rect.left + rect.width / 2 + (Math.random() - 0.5) * 10;
+            const y = rect.top + rect.height / 2 + (Math.random() - 0.5) * 10;
             
             simulateMouseMove(element);
             element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: x, clientY: y }));
             setTimeout(() => {
                 element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: x, clientY: y }));
                 element.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: x, clientY: y }));
-            }, 20 + Math.random() * 30);
+            }, 50 + Math.random() * 100);
         }
         
         // Helper to set React input value with human-like typing
@@ -459,9 +470,11 @@
             input.dispatchEvent(new Event('blur', { bubbles: true }));
         }
         
-        // Random delay helper
+        // Random delay helper with human-like variance
         function randomDelay(min, max) {
-            return min + Math.random() * (max - min);
+            const base = min + Math.random() * (max - min);
+            const variance = (Math.random() - 0.5) * 0.3 * base;
+            return Math.max(min, base + variance);
         }
         
         // Ensure sell price field is visible
@@ -568,13 +581,14 @@
             localStorage.setItem('maxLoss', document.getElementById('max-loss').value);
             localStorage.setItem('tradeDelay', document.getElementById('trade-delay').value);
             localStorage.setItem('bulkTrades', document.getElementById('bulk-trades').value);
+            localStorage.setItem('batchCount', document.getElementById('batch-count').value);
             localStorage.setItem('buySpread', document.getElementById('buy-spread').value);
             localStorage.setItem('lossInput', document.getElementById('loss-input').value);
                 log('✓ Configuration saved');
             });
         
             // Prevent inputs from triggering drag
-            ['user-nickname', 'hover-x', 'save-config', 'trade-amount', 'bulk-trades', 'bulk-pause', 'bulk-stop', 'max-loss', 'trade-delay', 'buy-spread', 'update-spread', 'clear-history', 'test-telegram', 'loss-input', 'update-loss-btn', 'log-output', 'clear-log', 'detailed-report', 'console-log-enabled', 'toggle-minimize'].forEach(id => {
+            ['user-nickname', 'hover-x', 'save-config', 'trade-amount', 'bulk-trades', 'batch-count', 'bulk-start', 'bulk-pause', 'bulk-stop', 'max-loss', 'trade-delay', 'buy-spread', 'update-spread', 'clear-history', 'test-telegram', 'loss-input', 'update-loss-btn', 'log-output', 'clear-log', 'detailed-report', 'console-log-enabled', 'toggle-minimize'].forEach(id => {
                 const el = document.getElementById(id);
                 if (el) el.addEventListener('mousedown', (e) => e.stopPropagation());
             });
@@ -871,16 +885,29 @@
             return window.currentBalance >= amount;
         }
         
-        // Bulk trade execution
-        let isExecuting = false;
-        let isPaused = false;
-        let completedTradesCount = 0;
-        let attemptedTradesCount = 0;
-        let balanceBeforeSession = 0;
-        let sessionCorrelationId = '';
-        let tradeResults = { completed: 0, cancelled: 0, price_moved: 0, cleanup: 0, timeout: 0 };
-        let buySpreadPercent = parseFloat(localStorage.getItem('buySpread')) || 0.06;
+        // Bulk trade execution with batching
         async function executeBulkTrades() {
+            totalBatches = parseInt(document.getElementById('batch-count').value) || 1;
+            currentBatch = 0;
+            
+            for (let batch = 0; batch < totalBatches; batch++) {
+                if (!isExecuting && batch > 0) break; // Stop if user clicked stop
+                currentBatch = batch + 1;
+                log(`\n========== BATCH ${currentBatch}/${totalBatches} ==========`);
+                await executeSingleBatch();
+                
+                // Wait 3 seconds between batches
+                if (batch < totalBatches - 1 && isExecuting) {
+                    log(`Waiting 3s before next batch...`);
+                    await new Promise(r => setTimeout(r, 3000));
+                }
+            }
+            
+            log(`\n========== ALL BATCHES COMPLETED ==========`);
+        }
+        
+        // Execute single batch of trades
+        async function executeSingleBatch() {
             if (isExecuting) {
                 console.log('Already executing, stopping current execution');
                 isExecuting = false;
@@ -941,40 +968,49 @@
             log(`Session starting balance: ${balanceBeforeSession.toFixed(2)} USDT`);
             
             const tradesCount = parseInt(document.getElementById('bulk-trades').value) || 10;
+            const batchTradesCount = tradesCount; // Trades per batch
             const tradeAmount = parseFloat(document.getElementById('trade-amount').value) || 1;
             const maxLoss = parseFloat(document.getElementById('max-loss').value) || 2;
             const tradeDelay = parseInt(document.getElementById('trade-delay').value) || 2;
             const statusEl = document.getElementById('bulk-status');
             
-            // Send start notification
+            // Send start notification (only for first batch)
             const nickname = localStorage.getItem('traderNickname') || 'Trader';
             let tokenName = getTokenName();
-            const startMessage = `<b>[${nickname}]</b> - ${new Date().toLocaleString()}\n` +
-                `🔑 ID: <code>${sessionCorrelationId}</code>\n\n` +
-                `🚀 <b>Trading Session Started</b>\n` +
-                `🪙 Token: ${tokenName}\n\n` +
-                `💵 Amount per Trade: ${tradeAmount} USDT\n` +
-                `🔢 Number of Trades: ${tradesCount}\n` +
-                `⚠️ Max Loss: ${maxLoss} USDT\n` +
-                `📊 Spread: ${buySpreadPercent}%\n` +
-                `⏱️ Delay: ${tradeDelay}s`;
-            await sendTelegramMessage(startMessage);
+            if (currentBatch === 1) {
+                const startMessage = `<b>[${nickname}]</b> - ${new Date().toLocaleString()}\n` +
+                    `🔑 ID: <code>${sessionCorrelationId}</code>\n\n` +
+                    `🚀 <b>Trading Session Started</b>\n` +
+                    `🪙 Token: ${tokenName}\n\n` +
+                    `💵 Amount per Trade: ${tradeAmount} USDT\n` +
+                    `🔢 Trades per Batch: ${batchTradesCount}\n` +
+                    `📦 Total Batches: ${totalBatches}\n` +
+                    `⚠️ Max Loss: ${maxLoss} USDT\n` +
+                    `📊 Spread: ${buySpreadPercent}%\n` +
+                    `⏱️ Delay: ${tradeDelay}s`;
+                await sendTelegramMessage(startMessage);
+            } else {
+                log(`Starting batch ${currentBatch}/${totalBatches}`);
+            }
             
             // Countdown before starting
             statusEl.textContent = 'Starting in 3...';
             statusEl.style.color = '#FFD700';
+            log('Countdown: 3...');
             await new Promise(r => setTimeout(r, 1000));
             statusEl.textContent = 'Starting in 2...';
+            log('Countdown: 2...');
             await new Promise(r => setTimeout(r, 1000));
             statusEl.textContent = 'Starting in 1...';
+            log('Countdown: 1...');
             await new Promise(r => setTimeout(r, 1000));
             
-            console.log('Starting new bulk trade execution');
+            log('Countdown complete, initializing...');
             isExecuting = true;
             isPaused = false;
             completedTradesCount = 0;
-            attemptedTradesCount = 0;
             sessionVolume = 0;
+            log('Variables initialized, starting cleanup...');
             const totalLossEl = document.getElementById('bulk-total-loss');
             const startBtn = document.getElementById('bulk-start');
             const pauseBtn = document.getElementById('bulk-pause');
@@ -986,8 +1022,11 @@
             // Initial cleanup check
             statusEl.textContent = 'Checking prerequisites...';
             statusEl.style.color = '#FFD700';
+            log('Starting cleanupExistingSellOrders...');
             await cleanupExistingSellOrders();
+            log('Cleanup complete, waiting 500ms...');
             await new Promise(r => setTimeout(r, 500));
+            log('Wait complete, checking holdings...');
             
             // Check holdings and sell if > $0.5
             tokenName = getTokenName();
@@ -1028,10 +1067,12 @@
             if (openOrdersTab) openOrdersTab.click();
             await new Promise(r => setTimeout(r, 500));
             
-            for (let i = 0; i < tradesCount; i++) {
+            log(`Starting trade loop: ${batchTradesCount} trades`);
+            for (let i = 0; i < batchTradesCount; i++) {
+                log(`\n--- Loop iteration ${i + 1}/${batchTradesCount} ---`);
                 if (!isExecuting) break;
                 
-                log(`\n=== Trade ${i + 1}/${tradesCount} ===`);
+                log(`\n=== Batch ${currentBatch}/${totalBatches} - Trade ${i + 1}/${batchTradesCount} ===`);
                 
                 // Check pause
                 while (isPaused && isExecuting) {
@@ -1056,7 +1097,7 @@
                         const usdValue = parseFloat(valueCell.textContent.replace(/[^0-9.]/g, ''));
                         if (usdValue > 0.5) {
                             log(`⚠ Holding ${tokenName}: $${usdValue} (> $0.5), executing sell...`);
-                            statusEl.textContent = `Trade ${i + 1}: Selling holdings...`;
+                            statusEl.textContent = `Batch ${currentBatch} - Trade ${i + 1}: Selling holdings...`;
                             const openOrdersTab = document.querySelector('#bn-tab-orderOrder > div:nth-child(1)');
                             if (openOrdersTab) openOrdersTab.click();
                             await new Promise(r => setTimeout(r, 500));
@@ -1091,7 +1132,7 @@
                     const orderText = orderSection.textContent;
                     if (orderText.includes(tokenName) && (orderText.includes('Buy') || orderText.includes('Sell'))) {
                         log(`⚠ Open orders exist for ${tokenName}, cleaning up...`);
-                        statusEl.textContent = `Trade ${i + 1}: Cleaning existing orders...`;
+                        statusEl.textContent = `Batch ${currentBatch} - Trade ${i + 1}: Cleaning...`;
                         
                         // Cancel all orders first
                         const cancelAllBtn = getXPathElement('/html/body/div[4]/div/div[3]/div/div[8]/div/div/div/div/div[2]/div[1]/div/div[3]/div/div/div[1]/table/thead/tr/th[9]/div');
@@ -1126,18 +1167,18 @@
                 
 
                 
-                statusEl.textContent = `Trade ${i + 1}/${tradesCount}: Calculating...`;
+                statusEl.textContent = `Batch ${currentBatch}/${totalBatches} - Trade ${i + 1}/${batchTradesCount}`;
                 statusEl.style.color = '#FFD700';
                 
                 // Fresh price calculation
                 const prices = calculateOptimalPrices();
-                log(`Buy: ${prices.buy} | Sell: ${prices.sell} | Loss: ${prices.loss}%`);
                 if (!prices) {
-                    statusEl.textContent = `Trade ${i + 1}/${tradesCount}: Price error`;
+                    statusEl.textContent = `Batch ${currentBatch} - Trade ${i + 1}: Price error`;
                     log('❌ Price calculation failed');
                     await new Promise(r => setTimeout(r, 2000));
                     continue;
                 }
+                log(`Buy: ${prices.buy} | Sell: ${prices.sell} | Loss: ${prices.loss}%`);
                 
                 const amount = parseFloat(document.getElementById('trade-amount').value) || 1;
                 console.log('Trade amount:', amount, 'Current balance:', window.currentBalance);
@@ -1175,19 +1216,19 @@
                 if (buyPriceInput && limitTotalInputs.length >= 2 && buyButton) {
                     log('Filling order form...');
                     buyPriceInput.focus();
-                    await new Promise(r => setTimeout(r, 100));
+                    await new Promise(r => setTimeout(r, 150 + Math.random() * 100));
                     setReactValue(buyPriceInput, prices.buy);
-                    await new Promise(r => setTimeout(r, 200));
+                    await new Promise(r => setTimeout(r, 200 + Math.random() * 150));
                     
                     amountInput.focus();
-                    await new Promise(r => setTimeout(r, 100));
+                    await new Promise(r => setTimeout(r, 150 + Math.random() * 100));
                     setReactValue(amountInput, amount.toString());
-                    await new Promise(r => setTimeout(r, 200));
+                    await new Promise(r => setTimeout(r, 200 + Math.random() * 150));
                     
                     sellPriceInput.focus();
-                    await new Promise(r => setTimeout(r, 100));
+                    await new Promise(r => setTimeout(r, 150 + Math.random() * 100));
                     setReactValue(sellPriceInput, prices.sell);
-                    await new Promise(r => setTimeout(r, 100));
+                    await new Promise(r => setTimeout(r, 150 + Math.random() * 100));
                     
                     // Verify sell price was set correctly (retry up to 3 times)
                     for (let retry = 0; retry < 3; retry++) {
@@ -1211,10 +1252,11 @@
                     }
                     
                     log('Submitting order...');
+                    await new Promise(r => setTimeout(r, 300 + Math.random() * 200));
                     simulateMouseMove(buyButton);
-                    await new Promise(r => setTimeout(r, randomDelay(30, 50)));
+                    await new Promise(r => setTimeout(r, randomDelay(50, 150)));
                     humanClick(buyButton);
-                    await new Promise(r => setTimeout(r, randomDelay(150, 200)));
+                    await new Promise(r => setTimeout(r, randomDelay(300, 500)));
                     log('Confirming...');
                     await clickConfirmWithRetry();
                     log('Order placed');
@@ -1231,11 +1273,11 @@
                         if (orderSection) {
                             const orderText = orderSection.textContent;
                             if (orderText.includes('Buy') && orderText.includes('Sell')) {
-                                statusEl.textContent = `Trade ${i + 1}/${tradesCount}: Buy+Sell active`;
+                                statusEl.textContent = `B${currentBatch}/${totalBatches} T${i + 1}/${batchTradesCount}: Buy+Sell`;
                             } else if (orderText.includes('Buy')) {
-                                statusEl.textContent = `Trade ${i + 1}/${tradesCount}: Buy filling...`;
+                                statusEl.textContent = `B${currentBatch}/${totalBatches} T${i + 1}/${batchTradesCount}: Buy...`;
                             } else if (orderText.includes('Sell')) {
-                                statusEl.textContent = `Trade ${i + 1}/${tradesCount}: Sell filling...`;
+                                statusEl.textContent = `B${currentBatch}/${totalBatches} T${i + 1}/${batchTradesCount}: Sell...`;
                             }
                         }
                     }, 500);
@@ -1247,7 +1289,7 @@
                     
                     log(`Result: ${result}`);
                     
-                    statusEl.textContent = `Trade ${i + 1}/${tradesCount}: ${result}`;
+                    statusEl.textContent = `B${currentBatch} T${i + 1}: ${result}`;
                     
                     // Only calculate loss and save if trade completed successfully
                     if (result === 'completed') {
@@ -1282,7 +1324,7 @@
                         // Delay after successful trade
                         const maxDelay = parseInt(document.getElementById('trade-delay')?.value) || 2;
                         const delay = 1000 + Math.random() * (maxDelay - 1) * 1000;
-                        statusEl.textContent = `Trade ${i + 1}/${tradesCount}: Waiting ${(delay/1000).toFixed(1)}s...`;
+                        statusEl.textContent = `B${currentBatch} T${i + 1}: Wait ${(delay/1000).toFixed(1)}s...`;
                         
                         // Check isExecuting during delay
                         const delayStart = Date.now();
@@ -1304,15 +1346,10 @@
             }
             
             const finalLoss = getTotalLossFromStorage();
-            statusEl.textContent = `Completed! Refreshing...`;
-            statusEl.style.color = '#4CAF50';
-            startBtn.style.display = 'inline-block';
-            pauseBtn.style.display = 'none';
-            document.getElementById('bulk-stop').style.display = 'none';
             
-            // Send Telegram notification
+            // Send Telegram notification after each batch
             console.log('Checking Telegram notification conditions:', { isExecuting, completedTradesCount });
-            if (isExecuting) {
+            if (isExecuting && completedTradesCount > 0) {
                 const nickname = localStorage.getItem('traderNickname') || 'Trader';
                 const trades = JSON.parse(localStorage.getItem('binanceTrades') || '[]');
                 const recentTrades = trades.slice(-completedTradesCount);
@@ -1346,14 +1383,17 @@
                 const celebrationMsg = sessionPnL > 0 ? '\n\n🔥💵 PROFIT PROFIT 💵🔥\n💎🚀 TO THE MOON 🚀💎' : '';
                 const detailedReport = document.getElementById('detailed-report').checked;
                 
+                const batchLabel = totalBatches > 1 ? `Batch ${currentBatch}/${totalBatches}` : 'Session';
+                const batchEmoji = currentBatch < totalBatches ? '📦' : '🏁';
+                
                 let message = `<b>[${nickname}]</b> - ${new Date().toLocaleString()}\n` +
                     `🔑 ID: <code>${sessionCorrelationId}</code>\n\n` +
-                    `🤖 <b>Trading Session Completed</b>\n` +
+                    `${batchEmoji} <b>${batchLabel} Completed</b>\n` +
                     `🪙 Token: ${tokenName}\n\n` +
                     `✅ Completed: ${completedTradesCount}\n` +
                     `💵 Amount per Trade: ${tradeAmount} USDT\n` +
                     `📈 Total Volume: ${sessionVolume.toFixed(2)} USDT\n` +
-                    `💰 Session ${pnlLabel}: ${Math.abs(sessionPnL).toFixed(6)} USDT\n` +
+                    `💰 ${batchLabel} ${pnlLabel}: ${Math.abs(sessionPnL).toFixed(6)} USDT\n` +
                     `📊 Balance Before: ${balanceBeforeSession.toFixed(2)} USDT\n` +
                     `📊 Balance After: ${balanceAfterSession.toFixed(2)} USDT\n` +
                     `${changeEmoji} Change: ${percentageChange}%${celebrationMsg}`;
@@ -1374,13 +1414,29 @@
                 console.log('Skipping Telegram notification - isExecuting:', isExecuting, 'completedTradesCount:', completedTradesCount);
             }
             
-            isExecuting = false;
-            isPaused = false;
-            console.log('Bulk trading completed, refreshing browser...');
-            
-            setTimeout(() => {
-                location.reload();
-            }, 2000);
+            // Reset for next batch or end session
+            if (currentBatch >= totalBatches) {
+                statusEl.textContent = `All batches completed! Refreshing...`;
+                statusEl.style.color = '#4CAF50';
+                startBtn.style.display = 'inline-block';
+                pauseBtn.style.display = 'none';
+                document.getElementById('bulk-stop').style.display = 'none';
+                
+                isExecuting = false;
+                isPaused = false;
+                console.log('All batches completed, refreshing browser...');
+                
+                setTimeout(() => {
+                    location.reload();
+                }, 2000);
+            } else {
+                statusEl.textContent = `Batch ${currentBatch} done, preparing next...`;
+                statusEl.style.color = '#FFD700';
+                // Reset counters for next batch
+                completedTradesCount = 0;
+                sessionVolume = 0;
+                balanceBeforeSession = window.currentBalance;
+            }
         }
         
         document.getElementById('bulk-start').addEventListener('click', (e) => {
@@ -1473,9 +1529,7 @@
                 isExecuting = false;
                 isPaused = false;
                 completedTradesCount = 0;
-                attemptedTradesCount = 0;
                 sessionVolume = 0;
-                tradeResults = { completed: 0, cancelled: 0, price_moved: 0, cleanup: 0, timeout: 0 };
                 
                 statusEl.textContent = 'STOPPED by user';
                 statusEl.style.color = '#FF0000';
@@ -1564,15 +1618,17 @@
                 console.log('Current token check:', currentToken, 'Order contains token:', !currentToken || orderText.includes(currentToken));
                 
                 if (!currentToken || orderText.includes(currentToken)) {
-                    console.log('Existing sell orders found for current token, cleaning up...');
+                    log('Existing sell orders found, cleaning up...');
                     
-                    // Never give up - keep trying until all orders are cleared
-                    while (true) {
+                    // Try up to 2 times
+                    for (let attempt = 0; attempt < 2; attempt++) {
+                        log(`Cleanup attempt ${attempt + 1}/2`);
+                        
                         // First: Cancel all open orders
                         const cancelAllBtn = getXPathElement('/html/body/div[4]/div/div[3]/div/div[8]/div/div/div/div/div[2]/div[1]/div/div[3]/div/div/div[1]/table/thead/tr/th[9]/div') ||
                                            document.querySelector('th.bn-web-table-cell:nth-child(9)');
                         if (cancelAllBtn) {
-                            console.log('Canceling all open orders');
+                            log('Canceling all open orders');
                             humanClick(cancelAllBtn);
                             await new Promise(r => setTimeout(r, 500));
                             await clickCancelConfirmWithRetry();
@@ -1589,13 +1645,15 @@
                             cleanupWait++;
                             const updatedSection = getXPathElement('/html/body/div[4]/div/div[3]/div/div[8]/div/div/div/div/div[2]/div[1]/div');
                             if (updatedSection && updatedSection.textContent.includes('No Ongoing Orders')) {
-                                console.log('All orders cleared successfully');
+                                log('✓ All orders cleared');
                                 return true;
                             }
                         }
                         
-                        console.log('Orders still exist, repeating cleanup process...');
+                        if (attempt < 1) log('Orders still exist, retrying...');
                     }
+                    log('⚠ Cleanup incomplete after 2 attempts, continuing anyway...');
+                    return false;
                 } else {
                     console.log('Sell orders found but not for current token, skipping cleanup');
                 }
