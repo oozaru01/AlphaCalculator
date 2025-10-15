@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Binance Trading Calculator Pro",
+  "version": "1.0.0",
+  "description": "Professional trading calculator with license protection",
+  "permissions": ["storage", "tabs"],
+  "host_permissions": ["*://*.binance.com/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [{
+    "matches": ["*://*.binance.com/*"],
+    "js": ["content.js"],
+    "run_at": "document_end"
+  }],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "icons": {
+    "48": "icon.png"
+  }
+}
