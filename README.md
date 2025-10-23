@@ -1,7 +1,7 @@
 # Binance Trading Calculator - TamperMonkey Script
 
 ## Overview
-A TamperMonkey userscript that provides real-time trading calculations and automation for Binance spot trading. The script analyzes the order book to suggest optimal buy/sell prices with minimal loss.
+A TamperMonkey userscript that provides real-time trading calculations and automation for Binance Alpha trading. The script analyzes the order book to suggest optimal buy/sell prices with minimal loss.
 
 # Public Release (Archived)
 
