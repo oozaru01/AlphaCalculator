@@ -1,5 +1,9 @@
 # Binance Trading Calculator - TamperMonkey Script
 
+I release this for no reason, make public this for no reason. 
+This main.js script targets specifically Binance Alpha point farming.
+I will not be responsible for any restriction place by Binance on your accounts.
+
 ## Overview
 A TamperMonkey userscript that provides real-time trading calculations and automation for Binance spot trading. The script analyzes the order book to suggest optimal buy/sell prices with minimal loss.
 
