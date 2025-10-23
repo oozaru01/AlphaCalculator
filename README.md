@@ -1,11 +1,57 @@
 # Binance Trading Calculator - TamperMonkey Script
 
-I release this for no reason, make public this for no reason. 
-This main.js script targets specifically Binance Alpha point farming.
-I will not be responsible for any restriction place by Binance on your accounts.
-
 ## Overview
 A TamperMonkey userscript that provides real-time trading calculations and automation for Binance spot trading. The script analyzes the order book to suggest optimal buy/sell prices with minimal loss.
+
+# Public Release (Archived)
+
+> This repository is being released publicly without an intended purpose.  
+> The contents are provided "as-is" for archival and educational/reference purposes only.
+
+## Summary
+
+This repository contains a historical/archival copy of a JavaScript file (`main.js`). The author has chosen to make the file public without endorsing any specific use or guaranteeing functionality.
+
+> **Important:** The repository **does not** provide instructions, guidance, or support for activities that may violate the terms of service of any third-party platform. Any attempt to use code in a way that abuses, circumvents, or exploits a service is the responsibility of the user.
+
+## Disclaimer & Legal Notice
+
+- I am **not** responsible for any consequences arising from use of the code in this repository.
+- You must comply with all applicable laws and the terms of service, policies, and rules of any third-party platform (including but not limited to Binance).
+- This repository is released without warranty of any kind. Use at your own risk.
+- If you are unsure whether an intended use is permitted, do not proceed — consult the platform's terms of service and consider seeking legal advice.
+
+## Purpose
+
+This repository is published only for archival or educational/reference purposes. It is not intended to instruct or enable activities that could be considered fraudulent, abusive, or in violation of any service's rules.
+
+## Project Status
+
+- **Status:** Archived / No active maintenance
+- **Support:** None — there will be no troubleshooting, feature requests, or help provided.
+
+## Contents
+
+- `main.js` — archived script file. (No operational documentation included.)
+
+> Note: The repository intentionally omits usage instructions and operational details.
+
+## Contributing
+
+Contributions are not accepted. If you wish to discuss the code for legitimate, ethical, and legal research purposes, open an issue with a clear, non-actionable description of your intent and we will consider whether to respond.
+
+## Security & Responsible Disclosure
+
+If you discover a security issue or a vulnerability in this project, please do **not** publish it publicly. Instead, open a private issue describing the problem. Responsible disclosure is appreciated.
+
+## License
+
+This project is provided under the [MIT License](LICENSE) — see the LICENSE file for details.
+
+## Contact
+
+For general inquiries about this archival release, open an issue. Responses are not guaranteed.
+
 
 ## Features
 
